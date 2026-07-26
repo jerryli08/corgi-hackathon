@@ -31,11 +31,7 @@ intent, runs search → approach → grasp → stow → return → present on a 
 robot, and replies with a short acknowledgement and a delivery text.
 
 <p align="center">
-  <img src="docs/assets/text-sim-demo.jpg" alt="Text sim demo — Messages left, simulation backend right" width="520" />
-</p>
-
-<p align="center">
-  <video src="docs/assets/text-sim-demo-screen.mp4" controls width="520"></video>
+  <img src="docs/assets/text-sim-demo.gif" alt="Text sim demo — iMessage request and simulation backend" width="520" />
 </p>
 
 Re-record after a sim change:
@@ -227,7 +223,7 @@ corgi-hackathon/
 ├── scripts/        # smoke, calibrate, record demo, router check
 ├── tests/          # no-hardware pytest suite
 ├── docs/
-│   ├── assets/     # README video / poster (text-sim-demo.*)
+│   ├── assets/     # README GIF (text-sim-demo.gif from the screen recording)
 │   └── TRAINING_GRASP.md
 ├── datasets/       # recorded teleop / grasp data
 └── corgi/          # Photon Spectrum bridge (gitignored scaffold)
