@@ -12,6 +12,8 @@ _C = GRIPPER_CLOSED_DEG
 POSES = {
     # folded, safe to power on in
     "HOME":      [0.0, -80.0,  95.0,  40.0, 0.0, _O],
+    # same fold as HOME, but jaws stay shut -- post-grasp retract before place
+    "HOME_HOLD": [0.0, -80.0,  95.0,  40.0, 0.0, _C],
     # camera looking forward, arm out of frame -- the driving/searching pose
     "SCAN":      [0.0, -55.0,  80.0,  10.0, 0.0, _O],
     # above the object, jaws open, camera looking down at it
