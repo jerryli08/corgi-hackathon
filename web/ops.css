@@ -1,0 +1,158 @@
+:root {
+  --bg: #0e0e10;
+  --panel: #141417;
+  --line: #2a2a30;
+  --ink: #d8d8dc;
+  --mute: #75757e;
+  --accent: #5ad0b4;
+  --warn: #e2694f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+h1 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rig {
+  flex: 1;
+  color: var(--mute);
+}
+
+main {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 1rem;
+  padding: 1rem;
+  align-items: start;
+}
+
+.pane {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.85rem;
+}
+
+#cam {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.jog,
+.skills,
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+  align-items: center;
+}
+
+.tabs {
+  margin: 0 0 0.7rem;
+  justify-content: space-between;
+}
+
+.tab-label {
+  color: var(--mute);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+button,
+input {
+  font: inherit;
+  color: var(--ink);
+  background: #1d1d22;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.42rem 0.7rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  background: #26262c;
+  border-color: #3a3a42;
+}
+
+button.danger {
+  color: var(--warn);
+  border-color: #4a2b24;
+}
+
+input {
+  min-width: 11rem;
+}
+
+.log {
+  height: 22rem;
+  overflow: auto;
+  background: #0a0a0c;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.6rem 0.7rem;
+}
+
+.log div {
+  padding: 0.1rem 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log .at {
+  color: var(--mute);
+}
+
+.log .phase {
+  color: var(--accent);
+}
+
+.log .bad {
+  color: var(--warn);
+}
+
+.truth {
+  margin: 0.7rem 0 0;
+  max-height: 12rem;
+  overflow: auto;
+  color: var(--mute);
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 800px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+}

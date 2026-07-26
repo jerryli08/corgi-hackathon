@@ -121,6 +121,67 @@ button:active {
   font-size: 0.95rem;
 }
 
+.live {
+  margin: 0.25rem 0 1.5rem;
+  padding: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  animation: rise 400ms ease-out both;
+}
+
+.live-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.98rem;
+  font-weight: 500;
+}
+
+.dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.track {
+  height: 3px;
+  margin: 0.85rem 0;
+  background: rgba(28, 23, 18, 0.1);
+  overflow: hidden;
+}
+
+.bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 500ms ease;
+}
+
+.viewport {
+  margin: 0;
+}
+
+.viewport img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: #16110c;
+  border: 1px solid var(--line);
+}
+
+.viewport figcaption {
+  margin-top: 0.45rem;
+  color: var(--mute);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .orders {
   list-style: none;
   margin: 0;
@@ -149,6 +210,32 @@ button:active {
   white-space: nowrap;
 }
 
+.orders .badge.failed {
+  color: #a63d2f;
+}
+
+.orders .badge.help {
+  color: #b5761f;
+}
+
+.orders .badge.cancelled {
+  color: var(--mute);
+}
+
+.foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2rem;
+  color: var(--mute);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+
+.foot a {
+  color: var(--mute);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -158,6 +245,18 @@ button:active {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   border: 0;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
 }
 
 @keyframes rise {

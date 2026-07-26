@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>corgi ops</title>
+    <link rel="stylesheet" href="/static/ops.css" />
+  </head>
+  <body>
+    <header>
+      <h1>corgi ops</h1>
+      <span id="rig" class="rig">…</span>
+      <button id="estop" class="danger">e-stop</button>
+    </header>
+
+    <main>
+      <section class="pane">
+        <img id="cam" alt="Robot camera" />
+        <div class="jog">
+          <button data-linear="0.18" data-angular="0">forward</button>
+          <button data-linear="0" data-angular="1.0">left</button>
+          <button data-linear="0" data-angular="-1.0">right</button>
+          <button data-linear="-0.18" data-angular="0">back</button>
+          <button id="halt">stop</button>
+        </div>
+        <div class="skills">
+          <input id="target" value="strawberries" spellcheck="false" />
+          <button data-skill="fetch">fetch</button>
+          <button data-skill="deliver">deliver</button>
+          <button data-skill="return_item">put back</button>
+          <button data-skill="scene">scene</button>
+        </div>
+      </section>
+
+      <section class="pane">
+        <div class="tabs">
+          <span class="tab-label">phase log</span>
+          <button id="clear">clear</button>
+        </div>
+        <div id="log" class="log"></div>
+        <pre id="truth" class="truth"></pre>
+      </section>
+    </main>
+
+    <script src="/static/ops.js"></script>
+  </body>
+</html>

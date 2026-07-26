@@ -32,7 +32,25 @@
       </form>
 
       <p id="status" class="status" aria-live="polite"></p>
+
+      <section id="live" class="live" hidden>
+        <div class="live-head">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="live-phase">standing by</span>
+        </div>
+        <div class="track"><div id="live-bar" class="bar"></div></div>
+        <figure class="viewport">
+          <img id="cam" alt="Live view from the robot's camera" />
+          <figcaption>robot's eye view</figcaption>
+        </figure>
+      </section>
+
       <ul id="orders" class="orders"></ul>
+
+      <footer class="foot">
+        <span id="rig" class="rig"></span>
+        <a href="/ops">ops console</a>
+      </footer>
     </main>
     <script src="/static/app.js"></script>
   </body>

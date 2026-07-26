@@ -1,4 +1,16 @@
+# Loose lower bounds on purpose: this has to install on whatever Python the Mac
+# happens to have, and that is not worth debugging at 3am.
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
-pyserial>=3.5
 pydantic>=2.0
+pyserial>=3.5
+numpy>=1.26
+opencv-python>=4.10
+httpx>=0.28
+python-dotenv>=1.0
+websockets>=13.0
+
+# Hardware only, installed by hand on the machine that needs them.
+#   feetech-servo-sdk   the SO-101 arm bus. Only needed with CORGI_ARM_ENABLED=1.
+#   pupil-apriltags     real tag detection for the return leg. No wheels on very new
+#                       Pythons, and robot/tags.py falls back to color without it.
