@@ -18,9 +18,9 @@ from robot.config import (
     GRIPPER_CLOSED_DEG,
     GRIPPER_EMPTY_THRESHOLD_DEG,
     GRIPPER_OPEN_DEG,
+    JOINT_NAMES,
     JOINT_SIGN,
     MOVE_HZ,
-    SERVO_BAUD,
     SERVO_IDS,
     SERVO_PORT,
     TICKS_PER_DEG,
@@ -192,17 +192,27 @@ class MockArm(ArmBase):
 
 
 class FeetechArm(ArmBase):
-    """STS3215 servos on a half-duplex TTL bus."""
+    """STS3215 servos on a half-duplex TTL bus, driven through LeRobot's FeetechMotorsBus.
+
+    We talk to the bus in raw ticks (normalize=False) and keep our own degree<->tick
+    map (CENTER_TICKS + sign * deg * TICKS_PER_DEG), so the pose keyframes in poses.py
+    stay meaningful without depending on a LeRobot calibration file.
+    """
 
     def __init__(self) -> None:
         super().__init__()
-        from scservo_sdk import PortHandler, sms_sts  # type: ignore
+        from lerobot.motors import Motor, MotorNormMode
+        from lerobot.motors.feetech import FeetechMotorsBus
 
-        self._port = PortHandler(SERVO_PORT)
-        if not self._port.openPort():
-            raise RuntimeError(f"could not open servo port {SERVO_PORT}")
-        self._port.setBaudRate(SERVO_BAUD)
-        self._bus = sms_sts(self._port)
+        # RANGE_M100_100 vs DEGREES only matters for normalized reads/writes, which we
+        # never use -- every access below passes normalize=False.
+        self._motors = {
+            name: Motor(sid, "sts3215", MotorNormMode.RANGE_M100_100)
+            for name, sid in zip(JOINT_NAMES, SERVO_IDS, strict=True)
+        }
+        self._bus = FeetechMotorsBus(port=SERVO_PORT, motors=self._motors)
+        self._bus.connect(handshake=False)
+        self._bus.enable_torque()
         self._positions = self._read_all()
 
     @staticmethod
@@ -215,24 +225,27 @@ class FeetechArm(ArmBase):
 
     def _read_all(self) -> list[float]:
         out = []
-        for sid, sign in zip(SERVO_IDS, JOINT_SIGN, strict=True):
-            ticks, _, _ = self._bus.ReadPos(sid)
-            out.append(self._ticks_to_deg(ticks, sign))
+        for name, sign in zip(JOINT_NAMES, JOINT_SIGN, strict=True):
+            ticks = self._bus.read("Present_Position", name, normalize=False)
+            out.append(self._ticks_to_deg(int(ticks), sign))
         return out
 
     def _write(self, degrees: list[float]) -> None:
-        for sid, sign, deg in zip(SERVO_IDS, JOINT_SIGN, degrees, strict=True):
-            self._bus.WritePosEx(sid, self._deg_to_ticks(deg, sign), 2400, 50)
+        goal = {
+            name: self._deg_to_ticks(deg, sign)
+            for name, sign, deg in zip(JOINT_NAMES, JOINT_SIGN, degrees, strict=True)
+        }
+        self._bus.sync_write("Goal_Position", goal, normalize=False)
 
     def _gripper_blocked(self) -> bool:
-        ticks, _, _ = self._bus.ReadPos(SERVO_IDS[5])
-        actual = self._ticks_to_deg(ticks, JOINT_SIGN[5])
+        gripper = JOINT_NAMES[5]
+        ticks = self._bus.read("Present_Position", gripper, normalize=False)
+        actual = self._ticks_to_deg(int(ticks), JOINT_SIGN[5])
         self._positions[5] = actual
         return actual > GRIPPER_EMPTY_THRESHOLD_DEG
 
     def relax(self) -> None:
-        for sid in SERVO_IDS:
-            self._bus.write1ByteTxRx(sid, 40, 0)  # torque enable off
+        self._bus.disable_torque()
 
 
 def make_arm(mock: bool, enabled: bool) -> ArmBase:
