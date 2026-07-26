@@ -31,14 +31,18 @@ intent, runs search → approach → grasp → stow → return → present on a 
 robot, and replies with a short acknowledgement and a delivery text.
 
 <p align="center">
-  <img src="docs/assets/text-sim-demo.gif" alt="Text sim demo — message in, robot acts, reply out" width="520" />
+  <video
+    src="https://github.com/jerryli08/corgi-hackathon/releases/download/demo-media/text-sim-demo.mp4"
+    poster="docs/assets/text-sim-demo.jpg"
+    controls
+    muted
+    playsinline
+    width="520">
+    <a href="https://github.com/jerryli08/corgi-hackathon/releases/download/demo-media/text-sim-demo.mp4">
+      <img src="docs/assets/text-sim-demo.jpg" alt="Text sim demo — message in, robot acts, reply out" width="520" />
+    </a>
+  </video>
 </p>
-
-<!-- GitHub README sanitizes <video>; use the GIF above. Local / VS Code can play the mp4:
-<p align="center">
-  <video src="docs/assets/text-sim-demo.mp4" controls width="520"></video>
-</p>
--->
 
 Re-record after a sim change:
 
