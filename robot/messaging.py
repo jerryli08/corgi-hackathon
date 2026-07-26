@@ -157,6 +157,35 @@ class PhotonMessenger(Messenger):
         await self._http.aclose()
 
 
+def _is_browser_phone_space(space_id: str) -> bool:
+    """The web phone and the tests reply into `sim`, which is not a Spectrum space."""
+    return not space_id or space_id == "sim" or space_id.startswith("sim:")
+
+
+class BrowserPhoneMessenger(Messenger):
+    """Photon for real iMessage conversations; console for the browser phone.
+
+    Without this, `CORGI_MESSAGING_BACKEND=photon` makes every simulated text 404 on
+    the bridge (no conversation named `sim`). The web UI only shows successful sends,
+    so texting looks dead even when the skill already started.
+    """
+
+    def __init__(self, remote: Messenger, local: Messenger | None = None) -> None:
+        self.remote = remote
+        self.local = local or LogMessenger()
+        self.name = remote.name
+
+    async def send(self, space_id: str, text: str, *, to: str | None = None) -> None:
+        if _is_browser_phone_space(space_id):
+            await self.local.send(space_id, text, to=to)
+            return
+        await self.remote.send(space_id, text, to=to)
+
+    async def aclose(self) -> None:
+        await self.remote.aclose()
+        await self.local.aclose()
+
+
 # The recipient and the message text arrive as argv, never as script source. An item
 # name comes from whoever is texting us: interpolating it into this string would let
 # `" & (do shell script "...")` run as AppleScript. `on run argv` makes that impossible
@@ -227,7 +256,9 @@ def make_messenger(backend: str = MESSAGING_BACKEND) -> tuple[Messenger, list[st
             notes.append("messaging: no photon bridge URL, printing texts to the console instead")
         else:
             try:
-                return PhotonMessenger(), notes
+                # Browser-phone texts (`space_id=sim`) stay local; real Spectrum spaces
+                # still go through the bridge.
+                return BrowserPhoneMessenger(PhotonMessenger()), notes
             except Exception as exc:
                 notes.append(f"messaging: photon bridge unavailable ({exc}), printing instead")
     elif choice == "applescript":

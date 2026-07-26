@@ -94,6 +94,12 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify({ text }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.json();
+    // Show the reply from the response itself — do not wait on the outbox poll.
+    // (When messaging is Photon, a missed local delivery used to hide the bubble.)
+    if (body.reply) {
+      addMessage("robot", body.reply, Date.now() / 1000);
+    }
     setStatus("");
     await refreshLog();
   } catch {

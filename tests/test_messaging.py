@@ -436,3 +436,31 @@ def test_photon_without_a_bridge_url_degrades_to_log(monkeypatch: pytest.MonkeyP
     messenger, notes = make_messenger("photon")
     assert isinstance(messenger, LogMessenger)
     assert notes and "photon" in notes[0]
+
+
+@pytest.mark.asyncio
+async def test_photon_backend_keeps_browser_phone_replies_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The web phone uses space_id=sim. That is not a Spectrum conversation, so it must
+    never be POSTed to the Photon bridge — otherwise every simulated text 404s and the
+    UI looks like texting does nothing."""
+    from robot.messaging import BrowserPhoneMessenger, PhotonMessenger
+
+    monkeypatch.setattr("robot.messaging.PHOTON_BRIDGE_URL", "http://127.0.0.1:8787")
+    messenger, notes = make_messenger("photon")
+    assert notes == []
+    assert isinstance(messenger, BrowserPhoneMessenger)
+    assert isinstance(messenger.remote, PhotonMessenger)
+
+    called: list[tuple[str, str]] = []
+
+    async def track(space_id: str, text: str, *, to: str | None = None) -> None:
+        called.append((space_id, text))
+
+    messenger.remote.send = track  # type: ignore[method-assign]
+    await messenger.send("sim", "On my way to you.")
+    assert called == [], "browser-phone replies must not hit the Photon bridge"
+
+    await messenger.send("any;-;+15551234567", "On my way to you.")
+    assert called == [("any;-;+15551234567", "On my way to you.")]
