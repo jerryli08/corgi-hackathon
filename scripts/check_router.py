@@ -18,6 +18,8 @@ from __future__ import annotations
 import asyncio
 import sys
 
+from pydantic import ValidationError
+
 from robot.brain import RouterContext, make_router
 from robot.config import (
     MERGE_API,

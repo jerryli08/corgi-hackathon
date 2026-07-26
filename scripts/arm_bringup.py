@@ -26,13 +26,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from robot.arm import FeetechArm  # noqa: E402
-from robot.config import JOINT_NAMES, SERVO_IDS  # noqa: E402
-from robot.poses import POSES, resolve  # noqa: E402
+from robot.arm import FeetechArm
+from robot.config import JOINT_NAMES, SERVO_IDS
+from robot.poses import POSES
 
 
 def _print_positions(arm: FeetechArm) -> None:
-    live = arm._read_all()  # noqa: SLF001 -- bring-up tool, intentionally low-level
+    live = arm._read_all()
     arm._positions = list(live)  # keep the in-memory start pose honest for the next move
     print("  idx  joint            id   degrees")
     for i, (name, sid, deg) in enumerate(zip(JOINT_NAMES, SERVO_IDS, live, strict=True)):
@@ -75,8 +75,8 @@ def main() -> int:
                     torque = False
                     print("torque OFF -- you can move the arm by hand. 't' to hold again.")
                 else:
-                    arm._bus.enable_torque()  # noqa: SLF001
-                    arm._positions = arm._read_all()  # noqa: SLF001
+                    arm._bus.enable_torque()
+                    arm._positions = arm._read_all()
                     torque = True
                     print("torque ON -- holding current pose.")
             elif cmd == "speed" and len(parts) == 2:
@@ -132,8 +132,8 @@ def main() -> int:
     print("relaxing torque and disconnecting ...")
     try:
         arm.relax()
-        arm._bus.disconnect(disable_torque=True)  # noqa: SLF001
-    except Exception as exc:  # noqa: BLE001
+        arm._bus.disconnect(disable_torque=True)
+    except Exception as exc:
         print(f"  ! {exc}")
     print("bye.")
     return 0
