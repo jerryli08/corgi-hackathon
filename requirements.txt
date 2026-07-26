@@ -9,6 +9,10 @@ opencv-python>=4.10
 httpx>=0.28
 python-dotenv>=1.0
 websockets>=13.0
+# The native /responses path in robot/brain.py. Optional in spirit -- CORGI_ROUTER_BACKEND
+# defaults to "keyword" and make_router() degrades cleanly if this is missing -- but
+# small and cross-platform enough to just install by default rather than by hand.
+merge-gateway-python>=0.3
 
 # Tests. `pytest` runs the whole suite against the simulator, no hardware, no network.
 pytest>=8.0

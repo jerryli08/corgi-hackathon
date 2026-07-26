@@ -18,8 +18,6 @@ from __future__ import annotations
 import asyncio
 import sys
 
-import httpx
-
 from robot.brain import RouterContext, make_router
 from robot.config import (
     MERGE_API,
@@ -29,6 +27,11 @@ from robot.config import (
     ROUTER_DEEP_MODEL,
     ROUTER_FAST_MODEL,
 )
+
+try:
+    from merge_gateway import MergeGateway
+except ImportError:
+    MergeGateway = None  # type: ignore[assignment,misc]
 
 SAMPLES = [
     "can you bring me my water bottle please",
@@ -50,22 +53,31 @@ async def list_models() -> None:
         print("MERGE_API_KEY is not set, so there is nothing to list.")
         print("The keyword router needs no key and the demo runs on it.\n")
         return
-
-    url = f"{MERGE_BASE_URL.rstrip('/')}/models"
-    print(f"GET {url}")
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as http:
-            r = await http.get(url, headers={"Authorization": f"Bearer {MERGE_API_KEY}"})
-            r.raise_for_status()
-            data = r.json()
-    except Exception as exc:
-        print(f"  could not list models: {exc}\n")
+    if MergeGateway is None:
+        print("the merge_gateway package is not installed (pip install merge-gateway-python).")
+        print("The openai-compatible shim (CORGI_MERGE_API=openai) does not need it.\n")
         return
 
-    rows = data.get("data") or data.get("models") or []
-    names = sorted(
-        str(m.get("model") or m.get("id") or m) for m in rows if isinstance(m, (dict, str))
-    )
+    client = MergeGateway(api_key=MERGE_API_KEY, base_url=MERGE_BASE_URL, timeout=15.0)
+    print(f"GET {MERGE_BASE_URL}/models")
+    try:
+        listing = await asyncio.to_thread(client.models.list)
+    except ValidationError as exc:
+        # The live catalogue moves faster than a pinned SDK's schema -- a vendor
+        # capability the installed version has never heard of (e.g. a new input type)
+        # fails validation for every model in the same response, not just the new one.
+        # That is a version-skew problem, not a routing problem, so say so briefly
+        # instead of dumping pydantic's full field-by-field report.
+        print(f"  {exc.error_count()} model(s) did not match the installed SDK's schema.")
+        print("  Try: pip install -U merge-gateway-python\n")
+        return
+    except Exception as exc:  # this script exists to report failures
+        print(f"  could not list models: {exc}\n")
+        return
+    finally:
+        await asyncio.to_thread(client.close)
+
+    names = sorted(m.id for m in listing.data)
     print(f"  {len(names)} models reachable")
     for name in names:
         print(f"    {name}")

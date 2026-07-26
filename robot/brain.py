@@ -16,12 +16,15 @@ model did not, the keywords win and the override is recorded in RouteInfo. Missi
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
 from robot.config import (
     MERGE_API,
@@ -30,12 +33,21 @@ from robot.config import (
     ROUTER_BACKEND,
     ROUTER_CONFIDENCE_FLOOR,
     ROUTER_DEEP_MODEL,
-    ROUTER_DEEP_TIER,
     ROUTER_FAST_MODEL,
-    ROUTER_FAST_TIER,
     ROUTER_MAX_CHARS,
     ROUTER_TIMEOUT_S,
 )
+
+try:
+    # The official SDK (pip install merge-gateway-python) backs the native "responses"
+    # path. It is optional in the sense that make_router() degrades to the keyword
+    # router if it is missing -- the "openai" shim below needs no SDK at all -- but it
+    # is a normal entry in requirements.txt, not a hardware-only extra.
+    from merge_gateway import MergeGateway
+    from merge_gateway.types import Response as _MergeResponse
+except ImportError:  # pragma: no cover - exercised by not installing the package
+    MergeGateway = None  # type: ignore[assignment,misc]
+    _MergeResponse = Any  # type: ignore[assignment,misc]
 
 INTENT_KINDS = ("fetch", "come", "walk", "stop", "status", "help", "chat")
 
@@ -57,9 +69,13 @@ class RouteInfo:
     'which model handled this request' is the entire point of a router."""
 
     backend: str
-    tier: str
+    tier: str  # ours: "fast" or "deep" -- which of our two models was asked
     model: str = ""
     served_by: str = ""
+    # Merge's own routing metadata, when there is any to report: which vendor executed
+    # the call and which of Merge's routing tiers it picked, if a routing policy is
+    # configured. Blank when we are not using Merge's own routing (the normal case,
+    # since `tier` above is our client-side fast/deep choice of model, not theirs).
     service_tier: str = ""
     latency_ms: int = 0
     escalated: bool = False
@@ -715,8 +731,44 @@ def _reason(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {detail}"[:160]
 
 
+def _response_text_from_sdk(response: _MergeResponse) -> str:
+    """Pull the assistant text out of a merge_gateway Response.
+
+    A reasoning ("thinking") block can arrive in the same message before the text
+    block, so this walks every block of every output message rather than trusting
+    output[0].content[0] to be the answer.
+    """
+    for out in response.output:
+        for block in out.content:
+            if getattr(block, "type", None) == "text":
+                text = getattr(block, "text", "")
+                if isinstance(text, str) and text.strip():
+                    return text
+    raise _ReplyProblem("no text in the router reply")
+
+
+def _routing_label(response: _MergeResponse) -> str:
+    """Whatever Merge's own routing metadata reports, if there is any. Blank unless a
+    routing policy is configured on the dashboard -- we do our own fast/deep choice of
+    model client-side, so this is usually empty, and that is not a problem."""
+    routing = getattr(response, "routing", None)
+    if routing is None:
+        return ""
+    bits = []
+    if routing.vendor_used:
+        bits.append(routing.vendor_used)
+    if routing.selected_tier is not None:
+        bits.append(f"tier {routing.selected_tier}")
+    return " ".join(bits)
+
+
+_UNSET = object()  # distinguishes "client not passed" (build the real one) from
+# "client=None" (the tests' way of saying the package is genuinely not installed)
+
+
 class MergeRouter(Router):
-    """Merge Gateway over plain REST -- no SDK to version-pin.
+    """Merge Gateway: the official SDK (`pip install merge-gateway-python`) for the
+    native /responses path, plain REST for the OpenAI-compatible shim.
 
     Two tiers, and a keyword router held alongside for two jobs: answering when Merge
     does not, and checking every model answer for a "stop" or a "help" the model missed.
@@ -724,8 +776,26 @@ class MergeRouter(Router):
 
     name = "merge"
 
-    def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        # transport is a seam for the tests, which stub the gateway rather than reach it.
+    def __init__(
+        self,
+        *,
+        client: MergeGateway | None = _UNSET,  # type: ignore[assignment]
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        # The SDK's client is synchronous (a plain httpx.Client under the hood, with no
+        # seam of its own for a custom transport), so every call to it goes through
+        # asyncio.to_thread rather than blocking the event loop. `client` is the tests'
+        # seam for that path: a stand-in with the same responses.create(...) shape,
+        # never a real network call. `transport` is the equivalent seam for the
+        # OpenAI-compatible shim, which stays on plain async httpx.
+        if client is not _UNSET:
+            self._client = client
+        elif MergeGateway is not None:
+            self._client = MergeGateway(
+                api_key=MERGE_API_KEY, base_url=MERGE_BASE_URL, timeout=ROUTER_TIMEOUT_S
+            )
+        else:
+            self._client = None
         self._http = httpx.AsyncClient(timeout=ROUTER_TIMEOUT_S, transport=transport)
         self._fallback = KeywordRouter()
 
@@ -737,7 +807,7 @@ class MergeRouter(Router):
         try:
             reason = ""
             try:
-                intent = await self._ask(ROUTER_FAST_MODEL, ROUTER_FAST_TIER, "fast", clipped, ctx)
+                intent = await self._ask(ROUTER_FAST_MODEL, "fast", clipped, ctx)
                 if intent.confidence < ROUTER_CONFIDENCE_FLOOR:
                     reason = f"fast tier confidence {intent.confidence:.2f}"
             except _ReplyProblem as problem:
@@ -746,7 +816,7 @@ class MergeRouter(Router):
             if reason:
                 # A second, stronger opinion. If this one is unusable too, the except
                 # below hands the message to the keywords.
-                intent = await self._ask(ROUTER_DEEP_MODEL, ROUTER_DEEP_TIER, "deep", clipped, ctx)
+                intent = await self._ask(ROUTER_DEEP_MODEL, "deep", clipped, ctx)
                 intent.route.escalated = True
                 intent.route.note = f"escalated: {reason}"
         except Exception as exc:
@@ -796,46 +866,49 @@ class MergeRouter(Router):
         )
         return intent
 
-    async def _ask(
-        self, model: str, service_tier: str, tier: str, text: str, ctx: RouterContext
-    ) -> Intent:
+    async def _ask(self, model: str, tier: str, text: str, ctx: RouterContext) -> Intent:
         user = f"{text}\n\n{ctx.as_prompt_block()}"
         if MERGE_API == "openai":
-            reply, served_by, billed_tier = await self._ask_openai(model, user)
+            reply, served_by, routing_label = await self._ask_openai(model, user)
         else:
-            reply, served_by, billed_tier = await self._ask_responses(model, service_tier, user)
+            reply, served_by, routing_label = await self._ask_responses(model, user)
 
         route = RouteInfo(
             backend="merge",
             tier=tier,
             model=model,
             served_by=served_by,
-            service_tier=billed_tier,
+            service_tier=routing_label,
         )
         return _intent_from_json(_parse_json(reply), text, route)
 
-    async def _ask_responses(
-        self, model: str, service_tier: str, user: str
-    ) -> tuple[str, str, str]:
-        r = await self._http.post(
-            f"{MERGE_BASE_URL}/responses",
-            headers={"Authorization": f"Bearer {MERGE_API_KEY}"},
-            json={
-                "model": model,
-                "service_tier": service_tier,
-                "service_tier_fallback": True,
-                "input": [
+    async def _ask_responses(self, model: str, user: str) -> tuple[str, str, str]:
+        if self._client is None:
+            raise _ReplyProblem("the merge_gateway package is not installed")
+
+        try:
+            response = await asyncio.to_thread(
+                self._client.responses.create,
+                model=model,
+                input=[
                     {"type": "message", "role": "system", "content": SYSTEM_PROMPT},
                     {"type": "message", "role": "user", "content": user},
                 ],
-            },
-        )
-        r.raise_for_status()
-        data = _json_body(r)
-        # Which vendor and tier actually served the call is the interesting part of a
-        # router, so keep whatever Merge admits to.
-        served_by = str(data.get("model") or data.get("vendor") or "")
-        return _response_text(data), served_by, str(data.get("service_tier") or "")
+                include_routing_metadata=True,
+            )
+        except (ValueError, ValidationError) as exc:
+            # A malformed-but-200 body is the model's own bad answer, not a gateway
+            # outage -- one retry at the deep model usually fixes it, same as any other
+            # unusable reply. The SDK's own HTTP-status errors (401/404/429/5xx) and raw
+            # httpx transport errors (timeout, connect failure) are deliberately NOT
+            # caught here: those are outages, and route() sends them straight to the
+            # keyword fallback without spending a second call on a gateway that is not
+            # answering.
+            raise _ReplyProblem(f"gateway sent an unusable body: {exc}") from exc
+
+        # Which vendor actually served the call is the interesting part of a router, so
+        # keep whatever Merge admits to.
+        return _response_text_from_sdk(response), response.model or "", _routing_label(response)
 
     async def _ask_openai(self, model: str, user: str) -> tuple[str, str, str]:
         r = await self._http.post(
@@ -857,6 +930,8 @@ class MergeRouter(Router):
 
     async def aclose(self) -> None:
         await self._http.aclose()
+        if self._client is not None:
+            await asyncio.to_thread(self._client.close)
         await self._fallback.aclose()
 
 
@@ -865,6 +940,11 @@ def make_router(backend: str = ROUTER_BACKEND) -> tuple[Router, list[str]]:
     if backend == "merge":
         if not MERGE_API_KEY:
             notes.append("router: MERGE_API_KEY is not set, using the keyword router")
+        elif MERGE_API != "openai" and MergeGateway is None:
+            notes.append(
+                "router: the merge_gateway package is not installed "
+                "(pip install merge-gateway-python), using the keyword router"
+            )
         else:
             return MergeRouter(), notes
     elif backend not in ("keyword", ""):

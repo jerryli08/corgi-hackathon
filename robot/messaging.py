@@ -118,10 +118,12 @@ class LogMessenger(Messenger):
 
 
 class PhotonMessenger(Messenger):
-    """Outbound through the Node sidecar in bridge/, which owns the Spectrum SDK.
+    """Outbound through the corgi/ bridge process, which holds the live Spectrum
+    connection (`bun create spectrum-project@latest corgi --providers imessage`).
 
-    Only outbound goes this way. Inbound arrives on the webhook below, so the sidecar
-    being down costs replies, not commands.
+    Only outbound goes this way. Inbound arrives on POST /api/imessage/relay, pushed by
+    that same process as it reads Spectrum's own message stream, so the bridge being
+    down costs replies, not commands.
     """
 
     name = "photon"

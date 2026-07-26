@@ -138,14 +138,20 @@ DELIVER_SWEET_SPOT_H = _num("CORGI_DELIVER_SWEET_SPOT_H", 0.45)
 
 # --- Messaging (Photon / iMessage) ----------------------------------------
 # log         = print and record, no network. The default, and what the tests use.
-# photon      = Photon Spectrum, through the Node sidecar in bridge/ (outbound only;
-#               inbound arrives on the webhook below).
+# photon      = Photon Spectrum, through the bridge in corgi/ (outbound only; inbound
+#               arrives on the relay endpoint below, pushed by that same process).
 # applescript = the Messages app on this Mac via osascript. No account, no keys,
-#               genuinely iMessage; the fallback when the sidecar is not running.
+#               genuinely iMessage; the fallback when the bridge is not running.
 MESSAGING_BACKEND = os.getenv("CORGI_MESSAGING_BACKEND", "log")
 PHOTON_BRIDGE_URL = os.getenv("CORGI_PHOTON_BRIDGE_URL", "http://127.0.0.1:8787")
 PHOTON_BRIDGE_TIMEOUT_S = _num("CORGI_PHOTON_BRIDGE_TIMEOUT_S", 6.0)
+# Shared secret the corgi/ bridge sends on every relayed inbound text, so the endpoint
+# is not wide open to anything else running on the same machine. Blank skips the check
+# -- the bridge only binds loopback anyway, so this is defense in depth, not the lock.
+BRIDGE_SECRET = os.getenv("CORGI_BRIDGE_SECRET", "")
 # Spectrum's webhook signing secret. It is shown once, when the webhook is registered.
+# Only needed if you register a public Photon Cloud webhook instead of running the
+# corgi/ bridge -- the two are alternatives, not both at once.
 PHOTON_WEBHOOK_SECRET = os.getenv("CORGI_PHOTON_WEBHOOK_SECRET", "")
 # Refuse unsigned webhooks. Only turn this off to poke at the endpoint by hand.
 PHOTON_REQUIRE_SIGNATURE = _flag("CORGI_PHOTON_REQUIRE_SIGNATURE", "1")
@@ -166,9 +172,10 @@ ALLOW_SIMULATED_TEXTS = _flag("CORGI_ALLOW_SIMULATED_TEXTS", "1")
 # merge   = Merge Gateway, which is itself routing across providers underneath us.
 ROUTER_BACKEND = os.getenv("CORGI_ROUTER_BACKEND", "keyword")
 MERGE_BASE_URL = os.getenv("CORGI_MERGE_BASE_URL", "https://api-gateway.merge.dev/v1")
-# responses = Merge's native API, which reports back which vendor and tier served the
-#             call. That is the interesting part, so it is the default.
-# openai    = the OpenAI-compatible shim at {base}/openai/chat/completions.
+# responses = the official merge_gateway SDK's native /responses call, which reports
+#             back which vendor actually served each request. The default.
+# openai    = the OpenAI-compatible shim at {base}/openai/chat/completions, plain REST,
+#             no SDK dependency -- the fallback for anyone who does not want the package.
 MERGE_API = os.getenv("CORGI_MERGE_API", "responses")
 MERGE_API_KEY = os.getenv("MERGE_API_KEY", "")
 # Two tiers. A short command ("water please") never needs more than the fast one.
@@ -176,8 +183,6 @@ MERGE_API_KEY = os.getenv("MERGE_API_KEY", "")
 # your key can actually reach, rather than making you guess.
 ROUTER_FAST_MODEL = os.getenv("CORGI_ROUTER_FAST_MODEL", "anthropic/claude-haiku-4-5-20251001")
 ROUTER_DEEP_MODEL = os.getenv("CORGI_ROUTER_DEEP_MODEL", "anthropic/claude-sonnet-5")
-ROUTER_FAST_TIER = os.getenv("CORGI_ROUTER_FAST_TIER", "flex")  # merge service_tier
-ROUTER_DEEP_TIER = os.getenv("CORGI_ROUTER_DEEP_TIER", "standard")
 ROUTER_TIMEOUT_S = _num("CORGI_ROUTER_TIMEOUT_S", 8.0)
 # Below this the fast model's answer is not trusted and the deep model gets a turn.
 ROUTER_CONFIDENCE_FLOOR = _num("CORGI_ROUTER_CONFIDENCE_FLOOR", 0.65)

@@ -139,6 +139,31 @@ async def test_the_log_shows_both_sides(app_client, world):
     assert log["outbound"]
 
 
+# -- the corgi/ bridge relay -----------------------------------------------
+async def test_relay_runs_the_same_path_as_a_real_text(app_client, world):
+    """This is what the corgi/ bridge process posts once it holds the live Spectrum
+    connection -- a real text, not a simulated one."""
+    res = await app_client.post(
+        "/api/imessage/relay",
+        json={"space_id": "spc-real-1", "sender": "+15551234567", "text": "come here"},
+    )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["intent"]["kind"] == "come"
+    assert body["reply"]
+
+
+async def test_relay_requires_no_secret_when_none_is_configured(app_client):
+    # CORGI_BRIDGE_SECRET is unset in the test environment (see conftest.py), so a
+    # relay with no header at all must still be accepted.
+    res = await app_client.post(
+        "/api/imessage/relay",
+        json={"space_id": "spc-real-2", "sender": "+15551234567", "text": "status"},
+    )
+    assert res.status_code == 200
+
+
 # -- the router preview ---------------------------------------------------
 async def test_preview_reports_a_decision(app_client):
     res = await app_client.post(

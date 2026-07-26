@@ -29,6 +29,7 @@ from robot.brain import RouterContext, make_router
 from robot.concierge import Concierge
 from robot.config import (
     ALLOW_SIMULATED_TEXTS,
+    BRIDGE_SECRET,
     HOST,
     MOCK,
     PHOTON_REQUIRE_SIGNATURE,
@@ -200,6 +201,16 @@ class SimulateIn(BaseModel):
 
 class RouterPreviewIn(BaseModel):
     text: str = Field(min_length=1, max_length=600)
+
+
+class RelayIn(BaseModel):
+    """An inbound text, pushed by the corgi/ bridge process -- it holds the live
+    Spectrum connection and this is how it hands a text it just received to the robot.
+    """
+
+    space_id: str = Field(min_length=1, max_length=80)
+    sender: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=1, max_length=2000)
 
 
 class NudgeIn(BaseModel):
@@ -414,6 +425,27 @@ async def imessage_webhook(request: Request):
     if msg is None:
         return {"ignored": True, "reason": "not an inbound text message"}
     return await concierge.handle(msg)
+
+
+@app.post("/api/imessage/relay")
+async def imessage_relay(payload: RelayIn, request: Request):
+    """Inbound texts from the corgi/ bridge, which holds the live Spectrum connection.
+
+    This is a local, trusted process talking to itself over loopback, not a public
+    endpoint -- there is no HMAC signature to check the way there is on the webhook
+    above. CORGI_BRIDGE_SECRET is a second lock on the same door, not the door itself.
+    """
+    if BRIDGE_SECRET and request.headers.get("x-corgi-bridge-secret") != BRIDGE_SECRET:
+        raise HTTPException(401, "missing or wrong x-corgi-bridge-secret")
+
+    return await concierge.handle(
+        InboundMessage(
+            id=f"br_{uuid.uuid4().hex[:8]}",
+            sender=payload.sender,
+            space_id=payload.space_id,
+            text=payload.text,
+        )
+    )
 
 
 @app.post("/api/imessage/simulate")

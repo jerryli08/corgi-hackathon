@@ -18,11 +18,11 @@ that reads the messages, and the web server.
 
 ```
 web/              the resident's page (a phone) and the ops console
-bridge/           Node sidecar that sends iMessages through Photon
+corgi/            the Photon/Spectrum bridge -- its own scaffolded project, gitignored
 robot/server.py   HTTP + WebSocket API, the only entry point
 robot/concierge.py a text arrives -> an intent -> the robot does something -> a reply
 robot/brain.py    Merge Gateway as an LLM router: free text -> one typed intent
-robot/messaging.py Photon webhook in, iMessage out, and the rate limiter between
+robot/messaging.py iMessage in and out, and the rate limiter between
 robot/orders.py   the order queue
 robot/skills.py   search -> approach -> align -> grasp -> verify -> stow -> return
 robot/walker.py   walking alongside someone, dead-man operated
@@ -94,29 +94,52 @@ instead of extrapolating from the last run you happened to watch.
 
 ## Texting it for real (Photon)
 
-Inbound and outbound go different ways, because Photon's send path is a TypeScript SDK
-and its receive path is a webhook:
+The bridge is its own scaffolded project, not part of this repo (`corgi/` is
+gitignored, the same way `.venv/` is). It holds the live connection to Spectrum Cloud
+and does both directions in one small process — no webhook, no ngrok:
 
 ```
-phone -> Photon -> webhook -> FastAPI            (inbound)
-phone <- Photon <- sidecar  <- FastAPI            (outbound)
+phone <-> Photon <-> corgi/ (bun) <-> FastAPI  (both directions, one process each way)
 ```
 
-`bridge/README.md` is the whole setup: getting a project id and secret, the ngrok line,
-the curl that registers the webhook, where the signing secret goes, and how to start the
-sidecar. Two things worth knowing before you start: recipients must be phone numbers
-(Apple ID emails are not supported), and the webhook signature is checked against
-`CORGI_PHOTON_WEBHOOK_SECRET`, so an unset secret rejects everything rather than waving
-it through.
+Scaffold it once, from the repo root:
 
-If the sidecar will not start or there is no ngrok, `CORGI_MESSAGING_BACKEND=applescript`
-sends through the Messages app signed in on this Mac — no account, no keys, genuinely
-iMessage. It cannot receive, so inbound still needs the webhook or the browser page.
+```bash
+bun create spectrum-project@latest corgi --projectId <your-project-id> --providers imessage --yes
+```
+
+That authenticates to your Photon account, writes `corgi/.env` with the real
+`PROJECT_ID`/`PROJECT_SECRET`, and installs `spectrum-ts`. `corgi/src/index.ts` is
+already wired to this robot: it reads Spectrum's own inbound stream and posts each text
+to `POST /api/imessage/relay` on the Python server, and it runs a small HTTP server on
+`:8787` that `POST /send` — which is what `PhotonMessenger` in `robot/messaging.py`
+calls whenever the robot wants to reply.
+
+Run it alongside the robot:
+
+```bash
+cd corgi && bun start
+```
+
+Then set `CORGI_MESSAGING_BACKEND=photon` on the robot. Two things worth knowing:
+recipients must be phone numbers (Apple ID emails are not supported), and
+`CORGI_BRIDGE_SECRET`, if you set it on both sides, is a second lock on the relay
+endpoint — the bridge only ever binds loopback, so it is defense in depth, not the door.
+
+`POST /api/imessage/webhook` on the Python side still exists if you would rather
+register a public Photon Cloud webhook (needs ngrok and the signing secret,
+`CORGI_PHOTON_WEBHOOK_SECRET`) instead of running this bridge — the two are
+alternatives, not both at once.
+
+If the bridge will not start, `CORGI_MESSAGING_BACKEND=applescript` sends through the
+Messages app signed in on this Mac — no account, no keys, genuinely iMessage. It cannot
+receive, so inbound still needs the bridge, the webhook, or the browser page.
 
 ## The router (Merge Gateway)
 
 Turning "can you get me my pills, oh and the remote" into a typed intent is the one part
-of this that wants a model. Merge Gateway is the router:
+of this that wants a model. Merge Gateway is the router, through the official SDK
+(`pip install merge-gateway-python`, already in requirements.txt):
 
 ```bash
 MERGE_API_KEY=... CORGI_ROUTER_BACKEND=merge python scripts/check_router.py
@@ -124,7 +147,12 @@ MERGE_API_KEY=... CORGI_ROUTER_BACKEND=merge python scripts/check_router.py
 
 That prints what your key can actually serve, flags whether the model ids in
 `robot/config.py` are among them, then routes ten real messages and shows the decision
-for each — which model, which tier, how long, whether it escalated.
+for each — which model, which vendor actually served it, how long, whether it escalated.
+
+If the `merge_gateway` package is ever missing, `make_router()` degrades to the keyword
+router with a boot note rather than failing to start — the same as a missing API key.
+There is also a plain-REST OpenAI-compatible path (`CORGI_MERGE_API=openai`) for anyone
+who would rather not add the SDK dependency at all.
 
 Two tiers, because most messages are two words: the fast model reads everything, and only
 a low-confidence or unparseable answer costs a call to the deep one. Every failure —
@@ -202,7 +230,8 @@ the reason, so the ops console shows the robot choosing to stay quiet.
 |---|---|---|
 | GET | `/api/health` | what hardware came up, and why anything didn't |
 | GET | `/api/state` | robot phase, basket, current order, walker state |
-| POST | `/api/imessage/webhook` | inbound texts from Photon; signature checked |
+| POST | `/api/imessage/webhook` | inbound texts from a public Photon Cloud webhook; signature checked |
+| POST | `/api/imessage/relay` | inbound texts pushed by the corgi/ bridge process |
 | POST | `/api/imessage/simulate` | `{text}` — the same path with no phone in the loop |
 | GET | `/api/imessage/log` | messages in, messages out, and the ones held back |
 | GET | `/api/contacts` | who has texted, and what is remembered about them |
