@@ -31,23 +31,12 @@ intent, runs search → approach → grasp → stow → return → present on a 
 robot, and replies with a short acknowledgement and a delivery text.
 
 <p align="center">
-  <a href="https://github.com/jerryli08/corgi-hackathon/releases/download/demo-media/text-sim-demo.mp4">
-    <img src="docs/assets/text-sim-demo.jpg" alt="Text sim demo — message in, robot acts, reply out" width="520" />
-  </a>
+  <img src="docs/assets/text-sim-demo.jpg" alt="Text sim demo — Messages left, simulation backend right" width="520" />
 </p>
 
-<!--
-  Inline GitHub video player: only user-attachments URLs survive the README sanitizer.
-  Release / repo / raw paths get the whole <video> block stripped (blank hole).
-
-  To embed the .mov:
-  1. Open https://github.com/jerryli08/corgi-hackathon/edit/main/README.md
-  2. Drag docs/assets/text-sim-demo.mov (or docs/assets/text-sim-demo-screen.mp4) onto
-     a blank line under this comment
-  3. GitHub inserts a line like:
-     https://github.com/user-attachments/assets/<uuid>
-  4. Commit that. Leave the URL on its own line — that is the player.
--->
+<p align="center">
+  <video src="docs/assets/text-sim-demo-screen.mp4" controls width="520"></video>
+</p>
 
 Re-record after a sim change:
 
@@ -238,7 +227,7 @@ corgi-hackathon/
 ├── scripts/        # smoke, calibrate, record demo, router check
 ├── tests/          # no-hardware pytest suite
 ├── docs/
-│   ├── assets/     # README GIF / mp4 (text-sim-demo.*)
+│   ├── assets/     # README video / poster (text-sim-demo.*)
 │   └── TRAINING_GRASP.md
 ├── datasets/       # recorded teleop / grasp data
 └── corgi/          # Photon Spectrum bridge (gitignored scaffold)
