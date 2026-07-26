@@ -31,12 +31,14 @@ intent, runs search → approach → grasp → stow → return → present on a 
 robot, and replies with a short acknowledgement and a delivery text.
 
 <p align="center">
-  <img src="docs/assets/text-sim-demo.jpg" alt="Text sim demo poster" width="520" />
+  <img src="docs/assets/text-sim-demo.gif" alt="Text sim demo — message in, robot acts, reply out" width="520" />
 </p>
 
+<!-- GitHub README sanitizes <video>; use the GIF above. Local / VS Code can play the mp4:
 <p align="center">
-  <video src="docs/assets/text-sim-demo.mov" controls width="520"></video>
+  <video src="docs/assets/text-sim-demo.mp4" controls width="520"></video>
 </p>
+-->
 
 Re-record after a sim change:
 
@@ -227,7 +229,7 @@ corgi-hackathon/
 ├── scripts/        # smoke, calibrate, record demo, router check
 ├── tests/          # no-hardware pytest suite
 ├── docs/
-│   ├── assets/     # README video / poster (text-sim-demo.*)
+│   ├── assets/     # README GIF / mp4 (text-sim-demo.*)
 │   └── TRAINING_GRASP.md
 ├── datasets/       # recorded teleop / grasp data
 └── corgi/          # Photon Spectrum bridge (gitignored scaffold)
