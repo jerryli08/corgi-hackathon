@@ -36,7 +36,18 @@ robot, and replies with a short acknowledgement and a delivery text.
   </a>
 </p>
 
-https://github.com/jerryli08/corgi-hackathon/releases/download/demo-media/text-sim-demo.mp4
+<!--
+  Inline GitHub video player: only user-attachments URLs survive the README sanitizer.
+  Release / repo / raw paths get the whole <video> block stripped (blank hole).
+
+  To embed the .mov:
+  1. Open https://github.com/jerryli08/corgi-hackathon/edit/main/README.md
+  2. Drag docs/assets/text-sim-demo.mov (or docs/assets/text-sim-demo-screen.mp4) onto
+     a blank line under this comment
+  3. GitHub inserts a line like:
+     https://github.com/user-attachments/assets/<uuid>
+  4. Commit that. Leave the URL on its own line — that is the player.
+-->
 
 Re-record after a sim change:
 
