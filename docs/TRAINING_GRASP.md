@@ -2,6 +2,64 @@
 
 Hand this to whoever has the **NVIDIA PC**. Recording happens on the laptop with the arms; training happens on the GPU box.
 
+---
+
+## FOR JERRY — START HERE (recording is already done)
+
+The 40-episode dataset is **already committed to this repo**. You do not need the arms, the leader, or a camera. You need the repo, CUDA PyTorch, and your GPU.
+
+### 1. Get the repo (dataset is inside it)
+
+```powershell
+git clone https://github.com/jerryli08/corgi-hackathon.git
+cd corgi-hackathon
+git pull
+```
+
+Dataset path: `datasets/walker_pill_grasp_v2/` — 40 episodes, ~10,282 frames, single wrist camera (Logitech C920), task string `grasp the pill bottle on the shelf`.
+
+### 2. Install
+
+```powershell
+pip install "lerobot[feetech]"
+```
+
+Then install **CUDA-enabled PyTorch** for your GPU/driver: <https://pytorch.org/get-started/locally/>
+
+Verify before training — this must print `True` and your GPU name:
+
+```powershell
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+
+### 3. Train
+
+```powershell
+lerobot-train `
+  --dataset.repo_id=local/walker_pill_grasp_v2 `
+  --dataset.root=datasets/walker_pill_grasp_v2 `
+  --policy.type=act `
+  --output_dir=outputs/train/walker_pill_grasp_act `
+  --job_name=walker_pill_grasp_act `
+  --policy.device=cuda `
+  --batch_size=8 `
+  --steps=100000
+```
+
+Lower `--batch_size` to 4 if you hit CUDA out-of-memory. Expect roughly 1–3 hours on a modern NVIDIA GPU.
+
+### 4. Send back
+
+Copy this folder back to the walker laptop (zip it, USB, Drive, whatever):
+
+```
+outputs/train/walker_pill_grasp_act/checkpoints/last/pretrained_model
+```
+
+That is the trained grasp policy. Everything below is background/reference — Parts A and C are the walker laptop's job.
+
+---
+
 ## Goal (hybrid architecture)
 
 We only **learn** the hard part: see the pill bottle on a shelf and firmly grip it.
