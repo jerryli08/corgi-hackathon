@@ -15,10 +15,12 @@ POSES = {
     # camera looking forward, arm out of frame -- the driving/searching pose
     "SCAN":      [0.0, -55.0,  80.0,  10.0, 0.0, _O],
     # above the object, jaws open, camera looking down at it
-    "PRE_GRASP": [0.0, -20.0,  55.0,  55.0, 0.0, _O],
+    # Hand-taught on the mounted walker arm 2026-07-26.
+    "PRE_GRASP": [97.6, 59.4, 9.4, 40.0, -1.2, _O],
     # lowered onto the object
-    "DESCEND":   [0.0,   0.0,  40.0,  50.0, 0.0, _O],
-    "LIFT":      [0.0, -35.0,  70.0,  55.0, 0.0, _C],
+    "DESCEND":   [97.6, 85.1, -13.9, 39.7, -0.5, _O],
+    # clear of the floor (retracted toward the walker), holding
+    "LIFT":      [-1.8, -105.1, 63.5, 58.4, 1.6, _C],
     # tucked in tight while driving, keeps the centre of gravity back
     "CARRY":     [0.0, -75.0,  95.0,  60.0, 0.0, _C],
     # held out toward the person

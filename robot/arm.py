@@ -212,8 +212,26 @@ class FeetechArm(ArmBase):
         }
         self._bus = FeetechMotorsBus(port=SERVO_PORT, motors=self._motors)
         self._bus.connect(handshake=False)
+        self._soften()
         self._bus.enable_torque()
         self._positions = self._read_all()
+
+    def _soften(self) -> None:
+        """Drop the stock P gain so the arm holds without buzzing.
+
+        Feetech default P is 32; LeRobot's SO-101 config uses 16. We go a touch softer
+        (12) because this arm is bolted to a walker frame that amplifies shake. Must run
+        with torque off -- EEPROM/RAM writes that need an unlocked bus.
+        """
+        from lerobot.motors.feetech import OperatingMode
+
+        with self._bus.torque_disabled():
+            self._bus.configure_motors()
+            for name in JOINT_NAMES:
+                self._bus.write("Operating_Mode", name, OperatingMode.POSITION.value)
+                self._bus.write("P_Coefficient", name, 12)
+                self._bus.write("I_Coefficient", name, 0)
+                self._bus.write("D_Coefficient", name, 32)
 
     @staticmethod
     def _deg_to_ticks(deg: float, sign: int) -> int:
