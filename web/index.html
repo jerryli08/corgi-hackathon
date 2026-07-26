@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CORGI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=DM+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="stage">
+      <p class="brand">CORGI</p>
+      <h1>What should we grab?</h1>
+      <p class="lede">Tell the robot an item. It queues the run and heads for the shelf.</p>
+
+      <form id="order-form" autocomplete="off">
+        <label class="sr-only" for="item">Grocery item</label>
+        <input
+          id="item"
+          name="item"
+          type="text"
+          placeholder="e.g. Honey Nut Cheerios"
+          maxlength="80"
+          required
+        />
+        <button type="submit">Send robot</button>
+      </form>
+
+      <p id="status" class="status" aria-live="polite"></p>
+      <ul id="orders" class="orders"></ul>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
