@@ -51,17 +51,16 @@ After that, they load from the local cache when available.
 
 ## Camera Selection
 
-The webcam index is near the top of `main.py`:
+The webcam indices can be left on auto-detect or set per computer with environment variables:
 
-```python
-CAMERA_INDEX = None
-PREFERRED_CAMERA_NAME_KEYWORDS = ("c920", "logitech", "hd pro webcam", "usb")
-FALLBACK_CAMERA_INDICES = (1, 2, 3, 4, 0)
+```powershell
+$env:CORGI_FLOOR_CAMERA_INDEX="1"
+$env:CORGI_TARGET_CAMERA_INDEX="2"
 ```
 
-With `CAMERA_INDEX = None`, the app auto-lists DirectShow cameras and prefers names matching the USB Logitech C920 keywords. It prints the camera index and device name it opened.
+If these are unset, the app auto-lists DirectShow cameras and prefers names matching the USB Logitech C920 keywords. It opens one C920 as the floor/path camera, then opens a second camera for target detection while avoiding the first camera index.
 
-If auto-detection ever picks the wrong device, set `CAMERA_INDEX` to a number such as `1`, `2`, or `3` to force that camera.
+You can still edit `CAMERA_INDEX` and `TARGET_CAMERA_INDEX` near the top of `main.py` for quick local testing, but environment variables are better when several teammates run the same repo.
 
 Depth Anything V2 often behaves like inverse depth, where larger raw values are closer. The code converts that to clearance, where larger values are safer/farther:
 
@@ -71,7 +70,7 @@ DEPTH_VALUES_ARE_INVERSE = True
 
 ## Model and Planner Settings
 
-Both models use the same Logitech C920 frame. The code does not use another camera, Arduino, motors, serial communication, or robot control.
+Depth Anything and SegFormer use the same floor/path camera frame. A second side-mounted C920 is optional for orange pill-bottle detection. Arduino serial control is optional and is only used when servo steering is enabled.
 
 Key tuning constants are near the top of `main.py`:
 
@@ -107,6 +106,31 @@ EDGE_CANNY_HIGH = 150
 SIDE_EDGE_MAX_LINES = 10
 ```
 
+The side target camera detects an orange pill bottle using HSV color thresholding:
+
+```python
+ENABLE_TARGET_CAMERA = True
+TARGET_CAMERA_SIDE = "right"
+TARGET_ORANGE_HSV_LOW = (5, 80, 70)
+TARGET_ORANGE_HSV_HIGH = (28, 255, 255)
+TARGET_REACH_DISTANCE_CM = 24.0
+TARGET_KNOWN_WIDTH_CM = 5.5
+TARGET_FOCAL_LENGTH_PIXELS = 700.0
+TARGET_CENTER_DEADBAND_PIXELS = 55
+```
+
+Distance is estimated from apparent bottle width:
+
+```text
+distance_cm = known_width_cm * focal_length_pixels / detected_width_pixels
+```
+
+Calibrate `TARGET_FOCAL_LENGTH_PIXELS` by placing the bottle at a known distance, measuring its detected box width, and using:
+
+```text
+focal_length_pixels = detected_width_pixels * known_distance_cm / known_width_cm
+```
+
 `USE_DEPTH_OBSTACLE_MASK` and `USE_GRID_DEPTH_OBSTACLE_TRIM` are off by default so depth does not erase the floor grid while tuning. Set them to `True` later if you want depth boundaries to subtract from the floor region.
 
 The safe mask has a sudden-change guard. If a large part of the detected floor changes in one frame, the app holds the previous stable mask until the change repeats for `SUDDEN_MASK_CONFIRM_FRAMES`. The debug text shows `HOLD` while this filter is rejecting a likely bad frame.
@@ -128,6 +152,9 @@ The older calibrated ground-plane mode is still available in the code by setting
 - Draws red robot-width footprint boxes around the planned path so you can see the corridor the robot body needs.
 - Draws side guide lines using Canny edge detection and Hough line detection.
 - Draws a future-biased smoothed path through the segmented floor, so the start of the path bends toward the upcoming floor center instead of always beginning straight forward.
+- Uses the second side-mounted C920 to detect an orange pill bottle and override path following when the target is visible.
+- Stops when the bottle is centered in the target frame and close enough for the arm to reach.
+- If the bottle is centered but too far, it uses tank drive to maneuver toward the target side.
 - Prints live debug counts on the camera view: floor pixels, safe pixels, top-down grid cells, and path points.
 - Smooths depth, masks, and the selected path to reduce flicker and jitter.
 
@@ -148,6 +175,7 @@ This is separate from the camera pathing code. Use it first to confirm Python ca
 
 - Left continuous servo signal wire: Arduino `D9`
 - Right continuous servo signal wire: Arduino `D10`
+- Vertical linear-axis winch servo signal wire: Arduino `D3`
 - Servo power: use a separate 5-6V supply that can provide enough current
 - Servo ground and Arduino `GND`: connect together
 
@@ -166,7 +194,7 @@ Do not power drive servos from the Arduino 5V pin. Continuous servos can pull en
 The sketch listens for text commands:
 
 ```text
-L:90 R:90
+L:90 R:90 A:90
 ```
 
 For most continuous servos:
@@ -176,6 +204,8 @@ For most continuous servos:
 - above `90` spins the other direction
 
 The sketch also has a safety timeout: if it stops receiving commands, it sends both servos back to `90`.
+
+The Arduino sketch already supports the D3 winch servo through the `A:` value. You do not need to edit the sketch for timed winch moves unless you change the pin or want the timing to live on the Arduino instead of Python.
 
 ### Python Serial Test
 
@@ -203,15 +233,47 @@ Run interactive mode:
 python serial_servo_test.py --port COM3 --interactive
 ```
 
+Move the D3 winch upward for a fixed amount of time, then stop:
+
+```powershell
+python serial_servo_test.py --port COM3 --axis-up
+```
+
+Move the D3 winch downward for a fixed amount of time, then stop:
+
+```powershell
+python serial_servo_test.py --port COM3 --axis-down
+```
+
+## Server mission mode
+
+The merged server starts this program with `--mission "pill bottle"`. Mission mode
+follows webcam 1 until webcam 2 sees orange, then stops path following and uses slow
+two-wheel forward/back motion until the bottle is horizontally centered. Webcam 2 is
+rotated 180 degrees by default.
+
+Because the physical arm is not installed, payload motion is disabled by default.
+The pickup, basket drop, and winch stages still appear in the FSM and server status,
+but are dry runs and D3 remains stopped. Set `CORGI_SINGLECAM_PAYLOAD_ENABLED=1` only
+when the arm and payload motion are ready for a physical test.
+
+With no number, `--axis-up` and `--axis-down` default to 10 seconds. You can still pass a different duration after you measure the real lowest-to-highest travel time:
+
+```powershell
+python serial_servo_test.py --port COM3 --axis-up 6.5
+```
+
 Interactive commands:
 
 - `f` forward
 - `b` backward
 - `l` left
 - `r` right
+- `up` vertical axis up
+- `down` vertical axis down
 - `stop` stop
 - `q` quit
-- raw values like `108 72`
+- raw values like `108 72 90`
 
 If one wheel spins backward relative to the other, swap the direction values in `serial_servo_test.py` for that movement, or physically rotate the servo mounting. For continuous servos, you may also need to trim the servo so `90` is truly stopped.
 
@@ -225,12 +287,14 @@ If one wheel spins backward relative to the other, swap the direction values in 
 
 It does not use encoders yet.
 
-Servo control is disabled by default. After the standalone serial test works, set these near the top of `main.py`:
+After the standalone serial test works, set these per computer:
 
-```python
-ENABLE_SERVO_CONTROL = True
-ARDUINO_SERIAL_PORT = "COM3"
+```powershell
+$env:CORGI_SINGLECAM_SERVO_ENABLED="1"
+$env:CORGI_SINGLECAM_ARDUINO_PORT="COM5"
 ```
+
+The matching constants still exist near the top of `main.py` as defaults.
 
 Start slow with these defaults:
 

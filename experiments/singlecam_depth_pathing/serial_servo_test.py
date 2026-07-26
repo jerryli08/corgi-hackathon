@@ -17,6 +17,10 @@ SERVO_STOP = 90
 SERVO_SLOW = 18
 SERVO_FAST = 35
 COMMAND_DELAY_SECONDS = 1.2
+DEFAULT_AXIS_MOVE_SECONDS = 22.0
+AXIS_SEND_INTERVAL_SECONDS = 0.10
+AXIS_SPEED = 18
+AXIS_UP_SIGN = 1
 
 
 def list_serial_ports():
@@ -41,10 +45,11 @@ def open_serial(port, baud_rate):
     return connection
 
 
-def send_servo_command(connection, left, right):
+def send_servo_command(connection, left, right, axis=SERVO_STOP):
     left = int(max(0, min(180, left)))
     right = int(max(0, min(180, right)))
-    message = f"L:{left} R:{right}\n"
+    axis = int(max(0, min(180, axis)))
+    message = f"L:{left} R:{right} A:{axis}\n"
     connection.write(message.encode("ascii"))
     connection.flush()
     print(f"sent: {message.strip()}")
@@ -56,29 +61,47 @@ def send_servo_command(connection, left, right):
 
 def run_sequence(connection):
     tests = [
-        ("STOP", SERVO_STOP, SERVO_STOP),
-        ("FORWARD SLOW", SERVO_STOP + SERVO_SLOW, SERVO_STOP - SERVO_SLOW),
-        ("STOP", SERVO_STOP, SERVO_STOP),
-        ("BACKWARD SLOW", SERVO_STOP - SERVO_SLOW, SERVO_STOP + SERVO_SLOW),
-        ("STOP", SERVO_STOP, SERVO_STOP),
-        ("LEFT TURN", SERVO_STOP - SERVO_SLOW, SERVO_STOP - SERVO_SLOW),
-        ("STOP", SERVO_STOP, SERVO_STOP),
-        ("RIGHT TURN", SERVO_STOP + SERVO_SLOW, SERVO_STOP + SERVO_SLOW),
-        ("STOP", SERVO_STOP, SERVO_STOP),
+        ("STOP", SERVO_STOP, SERVO_STOP, SERVO_STOP),
+        ("FORWARD SLOW", SERVO_STOP + SERVO_SLOW, SERVO_STOP - SERVO_SLOW, SERVO_STOP),
+        ("STOP", SERVO_STOP, SERVO_STOP, SERVO_STOP),
+        ("BACKWARD SLOW", SERVO_STOP - SERVO_SLOW, SERVO_STOP + SERVO_SLOW, SERVO_STOP),
+        ("STOP", SERVO_STOP, SERVO_STOP, SERVO_STOP),
+        ("LEFT TURN", SERVO_STOP - SERVO_SLOW, SERVO_STOP - SERVO_SLOW, SERVO_STOP),
+        ("STOP", SERVO_STOP, SERVO_STOP, SERVO_STOP),
+        ("RIGHT TURN", SERVO_STOP + SERVO_SLOW, SERVO_STOP + SERVO_SLOW, SERVO_STOP),
+        ("STOP", SERVO_STOP, SERVO_STOP, SERVO_STOP),
+        ("AXIS UP", SERVO_STOP, SERVO_STOP, SERVO_STOP + SERVO_SLOW),
+        ("STOP", SERVO_STOP, SERVO_STOP, SERVO_STOP),
+        ("AXIS DOWN", SERVO_STOP, SERVO_STOP, SERVO_STOP - SERVO_SLOW),
+        ("STOP", SERVO_STOP, SERVO_STOP, SERVO_STOP),
     ]
 
-    for label, left, right in tests:
+    for label, left, right, axis in tests:
         print(f"\n{label}")
-        send_servo_command(connection, left, right)
+        send_servo_command(connection, left, right, axis)
         time.sleep(COMMAND_DELAY_SECONDS)
 
     send_servo_command(connection, SERVO_STOP, SERVO_STOP)
 
 
+def timed_axis_move(connection, direction, duration_seconds):
+    sign = AXIS_UP_SIGN if direction == "up" else -AXIS_UP_SIGN
+    axis_value = SERVO_STOP + sign * AXIS_SPEED
+    axis_value = int(max(0, min(180, axis_value)))
+
+    print(f"Moving axis {direction} for {duration_seconds:.2f} seconds at A:{axis_value}.")
+    end_time = time.monotonic() + max(0.0, duration_seconds)
+    while time.monotonic() < end_time:
+        send_servo_command(connection, SERVO_STOP, SERVO_STOP, axis_value)
+        time.sleep(AXIS_SEND_INTERVAL_SECONDS)
+    send_servo_command(connection, SERVO_STOP, SERVO_STOP, SERVO_STOP)
+    print("Axis stopped.")
+
+
 def interactive_mode(connection):
     print("Interactive mode.")
-    print("Commands: stop, f, b, l, r, q")
-    print("Raw servo command: two numbers, for example: 108 72")
+    print("Commands: stop, f, b, l, r, up, down, q")
+    print("Raw servo command: two or three numbers, for example: 108 72 90")
 
     while True:
         text = input("> ").strip().lower()
@@ -95,17 +118,22 @@ def interactive_mode(connection):
             send_servo_command(connection, SERVO_STOP - SERVO_SLOW, SERVO_STOP - SERVO_SLOW)
         elif text in {"r", "right"}:
             send_servo_command(connection, SERVO_STOP + SERVO_SLOW, SERVO_STOP + SERVO_SLOW)
+        elif text in {"up", "u"}:
+            send_servo_command(connection, SERVO_STOP, SERVO_STOP, SERVO_STOP + SERVO_SLOW)
+        elif text in {"down", "d"}:
+            send_servo_command(connection, SERVO_STOP, SERVO_STOP, SERVO_STOP - SERVO_SLOW)
         else:
             parts = text.replace(",", " ").split()
-            if len(parts) != 2:
-                print("Unknown command. Use stop, f, b, l, r, q, or two numbers like: 108 72")
+            if len(parts) not in {2, 3}:
+                print("Unknown command. Use stop, f, b, l, r, up, down, q, or values like: 108 72 90")
                 continue
             try:
                 left, right = int(parts[0]), int(parts[1])
+                axis = int(parts[2]) if len(parts) == 3 else SERVO_STOP
             except ValueError:
                 print("Servo values must be numbers from 0 to 180.")
                 continue
-            send_servo_command(connection, left, right)
+            send_servo_command(connection, left, right, axis)
 
 
 def parse_args():
@@ -114,6 +142,8 @@ def parse_args():
     parser.add_argument("--port", help="Arduino serial port, for example COM3.")
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD_RATE, help="Serial baud rate.")
     parser.add_argument("--interactive", action="store_true", help="Use keyboard interactive mode.")
+    parser.add_argument("--axis-up", type=float, nargs="?", const=DEFAULT_AXIS_MOVE_SECONDS, metavar="SECONDS", help="Move D3 axis upward for this many seconds, then stop. Defaults to 22 seconds.")
+    parser.add_argument("--axis-down", type=float, nargs="?", const=DEFAULT_AXIS_MOVE_SECONDS, metavar="SECONDS", help="Move D3 axis downward for this many seconds, then stop. Defaults to 22 seconds.")
     return parser.parse_args()
 
 
@@ -129,7 +159,14 @@ def main():
 
     try:
         with open_serial(args.port, args.baud) as connection:
-            if args.interactive:
+            if args.axis_up is not None and args.axis_down is not None:
+                print("ERROR: Choose only one of --axis-up or --axis-down.", file=sys.stderr)
+                return 1
+            if args.axis_up is not None:
+                timed_axis_move(connection, "up", args.axis_up)
+            elif args.axis_down is not None:
+                timed_axis_move(connection, "down", args.axis_down)
+            elif args.interactive:
                 interactive_mode(connection)
             else:
                 run_sequence(connection)

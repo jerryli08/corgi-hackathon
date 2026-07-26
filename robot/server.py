@@ -35,6 +35,7 @@ from robot.config import (
     PHOTON_REQUIRE_SIGNATURE,
     PHOTON_WEBHOOK_SECRET,
     PORT,
+    SINGLECAM_MISSION_ENABLED,
     STEP_MS,
     VISION_BACKEND,
 )
@@ -51,6 +52,7 @@ from robot.messaging import (
     verify_spectrum_signature,
 )
 from robot.orders import Order, OrderService, stub_fulfill
+from robot.singlecam_mission import should_use_singlecam_mission, singlecam_mission
 from robot.skills import Skills
 from robot.vision import HSV_PROFILES, NOT_FETCHABLE, make_vision
 from robot.walker import WalkerMode
@@ -81,6 +83,9 @@ _background: list[asyncio.Task] = []
 
 
 async def fulfill(order: Order) -> tuple[bool, str]:
+    if SINGLECAM_MISSION_ENABLED and should_use_singlecam_mission(order.item):
+        return await singlecam_mission.run(order.item, order_id=order.id, bus=bus)
+
     assert skills is not None
     return await skills.fetch_and_deliver(order.item, order_id=order.id)
 
@@ -101,7 +106,7 @@ def _router_context() -> RouterContext:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if skills is not None:
+    if skills is not None or SINGLECAM_MISSION_ENABLED:
         orders.set_fulfill(fulfill)
     else:
         BOOT_NOTES.append("no perception: orders are simulated until a camera is attached")
@@ -127,6 +132,8 @@ async def lifespan(_: FastAPI):
     await orders.stop()
     with contextlib.suppress(Exception):
         await walker.stop(reason="shutting down")
+    with contextlib.suppress(Exception):
+        await singlecam_mission.stop()
     if skills is not None:
         await skills.cancel_current()
     with contextlib.suppress(Exception):
@@ -255,6 +262,7 @@ def health():
         "vision_backend": VISION_BACKEND if vision else None,
         "messaging": outbox.stats(),
         "router": {"backend": router.name},
+        "singlecam_mission": singlecam_mission.state(),
         "walker": walker.state(),
         "basket": list(skills.basket) if skills else [],
         "notes": BOOT_NOTES,
@@ -575,9 +583,24 @@ async def estop():
     await walker.stop(reason="e-stop")
     if skills is not None:
         await skills.cancel_current()
+    await singlecam_mission.stop()
     await body.estop()
     bus.emit({"type": "estop", "phase": "CANCELLED", "human_text": "stopped", "ok": False})
     return {"ok": True}
+
+
+@app.post("/api/missions/singlecam/pill_bottle/start")
+async def singlecam_pill_bottle_start():
+    ok, message = await singlecam_mission.start("pill bottle")
+    if not ok:
+        raise HTTPException(409, message)
+    return {"ok": True, "message": message, "state": singlecam_mission.state()}
+
+
+@app.post("/api/missions/singlecam/stop")
+async def singlecam_stop():
+    await singlecam_mission.stop()
+    return {"ok": True, "state": singlecam_mission.state()}
 
 
 # --------------------------------------------------------------------------

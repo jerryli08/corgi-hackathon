@@ -251,6 +251,68 @@ the reason, so the ops console shows the robot choosing to stay quiet.
 | POST | `/api/estop` | stop everything: walker, skill, wheels, and relax the arm |
 | GET | `/api/debug/world` · POST `/api/debug/reset` | simulator ground truth, mock only |
 
+### Optional singlecam pill-bottle mission
+
+Tarun's two-camera Depth Anything / SegFormer experiment can be launched from the
+same order and iMessage flow. It is off by default and stays isolated under
+`experiments/singlecam_depth_pathing` while the physical arm integration is still in
+progress.
+
+Windows setup from a fresh clone:
+
+```powershell
+cd C:\path\to\corgi-hackathon
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+pip install -r experiments\singlecam_depth_pathing\requirements.txt
+```
+
+Run with the singlecam mission enabled:
+
+```powershell
+python run_singlecam_robot.py
+```
+
+That launcher loads the existing `.env` (including Photon settings), then forces the
+safe two-camera mode: the singlecam process exclusively owns `COM5`, the server's
+duplicate hardware drive is disabled, the physical arm is off, and payload/winch
+stages run dry. Press `Ctrl+C` once to stop the entire stack.
+
+Keep physical payload motion disabled until the arm is installed:
+
+```powershell
+$env:CORGI_SINGLECAM_PAYLOAD_ENABLED="0"
+```
+
+After the arm and pickup/drop motions are integrated, enable the D3 winch sequence
+explicitly with `CORGI_SINGLECAM_PAYLOAD_ENABLED=1`.
+
+Optional per-computer settings:
+
+```powershell
+$env:CORGI_FLOOR_CAMERA_INDEX="1"
+$env:CORGI_TARGET_CAMERA_INDEX="2"
+$env:CORGI_SINGLECAM_SERVO_ENABLED="1"
+```
+
+When enabled, text such as `i want my pill bottle` routes to a normal `fetch` order,
+but items matching `pill bottle`, `pills`, or `medicine` launch the two-camera mission.
+The server waits for the camera FSM instead of marking the order done when the process
+merely starts. Its states are `PATH_FOLLOWING`, `TARGET_CENTERING`, `TARGET_LOCKED`,
+`ARM_PICK_PLACEHOLDER`, `WINCH_UP`, `BASKET_DROP_PLACEHOLDER`, `WINCH_DOWN`,
+`RESUMING_PATH`, and `COMPLETE`. With payload motion disabled, arm and winch states
+are dry runs and D3 remains stopped. Stop texts and `/api/estop` gracefully interrupt
+the camera process so its cleanup stops all three continuous servos. The Arduino's
+one-second command watchdog remains the hardware fallback.
+
+Manual test endpoints:
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8000/api/missions/singlecam/pill_bottle/start
+curl.exe -X POST http://127.0.0.1:8000/api/missions/singlecam/stop
+```
+
 Bounding boxes are always normalized `[x0, y0, x1, y1]` in `0..1`, origin top-left.
 
 Intents: `fetch` · `come` · `walk` · `stop` · `status` · `help` · `chat`.

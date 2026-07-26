@@ -215,3 +215,16 @@ WALK_RECHECK_STEPS = _int("CORGI_WALK_RECHECK_STEPS", 12)
 # --- Basket ---------------------------------------------------------------
 # What the robot can carry aboard at once. The arm stows into it and lifts back out.
 BASKET_CAPACITY = _int("CORGI_BASKET_CAPACITY", 3)
+
+# --- Singlecam pill-bottle mission ---------------------------------------
+# Optional bridge to the Depth Anything + SegFormer experiment. It uses the same
+# Python executable that runs this server unless CORGI_SINGLECAM_MISSION_PYTHON is set.
+SINGLECAM_MISSION_ENABLED = _flag("CORGI_SINGLECAM_MISSION_ENABLED")
+SINGLECAM_MISSION_ITEM_KEYWORDS = _csv(
+    "CORGI_SINGLECAM_MISSION_ITEM_KEYWORDS", "pill bottle,pills,medicine"
+)
+SINGLECAM_MISSION_SCRIPT = os.getenv(
+    "CORGI_SINGLECAM_MISSION_SCRIPT", "experiments/singlecam_depth_pathing/main.py"
+)
+SINGLECAM_MISSION_PYTHON = os.getenv("CORGI_SINGLECAM_MISSION_PYTHON", "")
+SINGLECAM_MISSION_TIMEOUT_S = _num("CORGI_SINGLECAM_MISSION_TIMEOUT_S", 0.0)

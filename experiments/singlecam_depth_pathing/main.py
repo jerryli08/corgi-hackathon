@@ -1,5 +1,9 @@
+import argparse
+import json
+import os
 import sys
 import time
+from enum import Enum
 
 import cv2
 import numpy as np
@@ -16,8 +20,19 @@ except ImportError:
     serial = None
 
 
+def env_flag(name, default):
+    value = os.getenv(name)
+    return default if value is None else value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def env_optional_int(name, default=None):
+    value = os.getenv(name)
+    return default if value is None or not value.strip() else int(value)
+
+
 # Camera
-CAMERA_INDEX = None
+CAMERA_INDEX = env_optional_int("CORGI_FLOOR_CAMERA_INDEX")
+TARGET_CAMERA_INDEX = env_optional_int("CORGI_TARGET_CAMERA_INDEX")
 PREFERRED_CAMERA_NAME_KEYWORDS = ("c920", "logitech", "hd pro webcam", "usb")
 FALLBACK_CAMERA_INDICES = (1, 2, 3, 4, 0)
 FRAME_WIDTH = 640
@@ -123,7 +138,7 @@ STOP_TEXT = "STOP"
 
 # Optional Arduino continuous-servo control. Leave ARDUINO_SERIAL_PORT = None
 # while tuning vision. Set it to something like "COM3" when ready.
-ARDUINO_SERIAL_PORT = "COM5"
+ARDUINO_SERIAL_PORT = os.getenv("CORGI_SINGLECAM_ARDUINO_PORT", "COM5") or None
 ARDUINO_BAUD_RATE = 115200
 ARDUINO_RESET_WAIT_SECONDS = 2.0
 SERIAL_SEND_INTERVAL_SECONDS = 0.10
@@ -140,13 +155,72 @@ LEFT_SERVO_FORWARD_SIGN = -1
 RIGHT_SERVO_FORWARD_SIGN = 1
 
 # Path steering PID. Starts mostly proportional and slow.
-ENABLE_SERVO_CONTROL = True
+ENABLE_SERVO_CONTROL = env_flag("CORGI_SINGLECAM_SERVO_ENABLED", True)
 PID_KP = 26.0
 PID_KI = 0.0
 PID_KD = 6.0
 PID_INTEGRAL_LIMIT = 0.75
 PATH_LOOKAHEAD_RATIO = 0.84
 PATH_ERROR_AVERAGE_LAST_POINTS = 5
+
+# Side camera orange pill-bottle targeting
+ENABLE_TARGET_CAMERA = True
+TARGET_CAMERA_SIDE = "right"
+TARGET_ORANGE_HSV_LOW = (5, 80, 70)
+TARGET_ORANGE_HSV_HIGH = (28, 255, 255)
+TARGET_MIN_AREA_PIXELS = 600
+TARGET_MORPH_KERNEL_SIZE = 5
+TARGET_CENTER_DEADBAND_PIXELS = 55
+TARGET_REACH_DISTANCE_CM = 24.0
+TARGET_KNOWN_WIDTH_CM = 5.5
+TARGET_FOCAL_LENGTH_PIXELS = 700.0
+TARGET_TURN_MIN_SPEED = 9
+TARGET_TURN_MAX_SPEED = 18
+TARGET_APPROACH_SPEED = 10
+
+# Mission-mode sequencing. The physical arm is not integrated yet, so these are
+# timed stand-ins for the future arm pick, winch lift, basket drop, and winch lower.
+MISSION_BOTTLE_STABLE_FRAMES = 5
+MISSION_ARM_PICK_SECONDS = 3.0
+MISSION_WINCH_UP_SECONDS = 22.0
+MISSION_BASKET_DROP_SECONDS = 2.0
+MISSION_WINCH_DOWN_SECONDS = 22.0
+MISSION_AXIS_UP_VALUE = 104
+MISSION_AXIS_DOWN_VALUE = 76
+MISSION_TARGET_CENTER_DEADBAND_PIXELS = 25
+MISSION_TARGET_CENTER_STABLE_FRAMES = 5
+MISSION_TARGET_FB_KP = 7.0
+MISSION_TARGET_FB_MIN_SPEED = 5.0
+MISSION_TARGET_FB_MAX_SPEED = 9.0
+MISSION_TARGET_FB_SIGN = 1.0
+MISSION_TARGET_ROTATE_180 = True
+MISSION_ENABLE_PAYLOAD_SEQUENCE = False
+MISSION_RESUME_PATH_SECONDS = 2.0
+MISSION_EVENT_PREFIX = "CORGI_EVENT "
+
+
+class MissionState(str, Enum):
+    PATH_FOLLOWING = "PATH_FOLLOWING"
+    TARGET_CENTERING = "TARGET_CENTERING"
+    TARGET_LOCKED = "TARGET_LOCKED"
+    ARM_PICK_PLACEHOLDER = "ARM_PICK_PLACEHOLDER"
+    WINCH_UP = "WINCH_UP"
+    BASKET_DROP_PLACEHOLDER = "BASKET_DROP_PLACEHOLDER"
+    WINCH_DOWN = "WINCH_DOWN"
+    RESUMING_PATH = "RESUMING_PATH"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
+
+
+def emit_mission_event(state, item, human_text, progress, **details):
+    payload = {
+        "phase": state.value if isinstance(state, MissionState) else str(state),
+        "item": item,
+        "human_text": human_text,
+        "progress": float(progress),
+        **details,
+    }
+    print(MISSION_EVENT_PREFIX + json.dumps(payload, separators=(",", ":")), flush=True)
 
 
 def load_depth_model(device):
@@ -195,9 +269,15 @@ def label_ids_from_keywords(id2label, keywords):
     return set(ids)
 
 
-def open_camera():
+def open_camera(role="floor", preferred_index=None, excluded_indices=()):
+    if preferred_index is None and role == "floor":
+        preferred_index = CAMERA_INDEX
+    if preferred_index is None and role == "target":
+        preferred_index = TARGET_CAMERA_INDEX
     tried = []
-    for index, name in camera_candidates():
+    for index, name in camera_candidates(preferred_index):
+        if index in excluded_indices:
+            continue
         tried.append(index)
         capture = cv2.VideoCapture(index, cv2.CAP_DSHOW)
         if not capture.isOpened():
@@ -208,20 +288,20 @@ def open_camera():
             capture.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
             capture.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
             camera_name = f" ({name})" if name else ""
-            print(f"Using camera index {index}{camera_name}.")
-            return capture
+            print(f"Using {role} camera index {index}{camera_name}.")
+            return capture, index
 
         capture.release()
 
     raise RuntimeError(
-        f"Could not open a webcam. Tried camera indices: {tried}. "
+        f"Could not open {role} webcam. Tried camera indices: {tried}. "
         "Check that the Logitech C920 is connected and not already in use."
     )
 
 
-def camera_candidates():
-    if CAMERA_INDEX is not None:
-        yield CAMERA_INDEX, "manual CAMERA_INDEX"
+def camera_candidates(manual_index=None):
+    if manual_index is not None:
+        yield manual_index, "manual camera index"
 
     named_devices = list_directshow_camera_devices()
     preferred = []
@@ -379,6 +459,80 @@ def build_masks(depth_clearance, floor_probability):
 def colorize_depth(depth):
     depth_u8 = np.uint8(np.clip(depth, 0.0, 1.0) * 255)
     return cv2.applyColorMap(depth_u8, DEPTH_COLOR_MAP)
+
+
+def detect_orange_bottle(frame_bgr):
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(
+        hsv,
+        np.array(TARGET_ORANGE_HSV_LOW, dtype=np.uint8),
+        np.array(TARGET_ORANGE_HSV_HIGH, dtype=np.uint8),
+    )
+    kernel = np.ones((TARGET_MORPH_KERNEL_SIZE, TARGET_MORPH_KERNEL_SIZE), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None, mask
+
+    contour = max(contours, key=cv2.contourArea)
+    area = float(cv2.contourArea(contour))
+    if area < TARGET_MIN_AREA_PIXELS:
+        return None, mask
+
+    x, y, w, h = cv2.boundingRect(contour)
+    if w <= 0:
+        return None, mask
+
+    center_x = x + w / 2.0
+    center_y = y + h / 2.0
+    error_pixels = center_x - frame_bgr.shape[1] / 2.0
+    distance_cm = (TARGET_KNOWN_WIDTH_CM * TARGET_FOCAL_LENGTH_PIXELS) / max(1.0, float(w))
+    return {
+        "bbox": (x, y, w, h),
+        "area": area,
+        "center": (center_x, center_y),
+        "error_pixels": error_pixels,
+        "distance_cm": distance_cm,
+        "centered": abs(error_pixels) <= TARGET_CENTER_DEADBAND_PIXELS,
+        "reachable": distance_cm <= TARGET_REACH_DISTANCE_CM,
+    }, mask
+
+
+def draw_target_view(frame_bgr, detection, mask):
+    view = frame_bgr.copy()
+    center_x = view.shape[1] // 2
+    cv2.line(view, (center_x, 0), (center_x, view.shape[0]), (255, 255, 255), 1, cv2.LINE_AA)
+    center_y = view.shape[0] // 2
+    cv2.line(view, (0, center_y), (view.shape[1], center_y), (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.line(
+        view,
+        (center_x - TARGET_CENTER_DEADBAND_PIXELS, 0),
+        (center_x - TARGET_CENTER_DEADBAND_PIXELS, view.shape[0]),
+        (150, 150, 150),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.line(
+        view,
+        (center_x + TARGET_CENTER_DEADBAND_PIXELS, 0),
+        (center_x + TARGET_CENTER_DEADBAND_PIXELS, view.shape[0]),
+        (150, 150, 150),
+        1,
+        cv2.LINE_AA,
+    )
+
+    label = "NO BOTTLE"
+    color = (40, 40, 255)
+    if detection is not None:
+        x, y, w, h = detection["bbox"]
+        color = (40, 220, 40) if detection["centered"] and detection["reachable"] else (0, 180, 255)
+        cv2.rectangle(view, (x, y), (x + w, y + h), color, 3, cv2.LINE_AA)
+        label = f"BOTTLE {detection['distance_cm']:.0f}cm x:{detection['error_pixels']:+.0f}px"
+    cv2.putText(view, label, (18, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
+    cv2.putText(view, "TARGET CAMERA", (18, view.shape[0] - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+    return view
 
 
 def mask_to_bgr(mask, color):
@@ -875,6 +1029,40 @@ def servo_values_from_path(path_points, controller, frame_width):
     return left_value, right_value, error, correction
 
 
+def servo_values_for_tank_speeds(left_speed, right_speed):
+    left_speed = float(np.clip(left_speed, -MAX_SERVO_SPEED, MAX_SERVO_SPEED))
+    right_speed = float(np.clip(right_speed, -MAX_SERVO_SPEED, MAX_SERVO_SPEED))
+    left_value = SERVO_STOP + LEFT_SERVO_FORWARD_SIGN * left_speed
+    right_value = SERVO_STOP + RIGHT_SERVO_FORWARD_SIGN * right_speed
+    return int(round(np.clip(left_value, 0, 180))), int(round(np.clip(right_value, 0, 180)))
+
+
+def servo_values_from_target(detection):
+    if detection is None:
+        return None
+
+    error = float(np.clip(detection["error_pixels"] / (FRAME_WIDTH / 2.0), -1.0, 1.0))
+    if detection["centered"] and detection["reachable"]:
+        return SERVO_STOP, SERVO_STOP, "TARGET_STOP", error, 0.0
+
+    if detection["centered"] and not detection["reachable"]:
+        turn_direction = 1.0 if TARGET_CAMERA_SIDE.lower() == "right" else -1.0
+        left_value, right_value = servo_values_for_tank_speeds(
+            turn_direction * TARGET_APPROACH_SPEED,
+            -turn_direction * TARGET_APPROACH_SPEED,
+        )
+        return left_value, right_value, "TARGET_APPROACH_SIDE", error, TARGET_APPROACH_SPEED
+
+    turn_direction = 1.0 if error > 0.0 else -1.0
+    turn_amount = abs(error)
+    turn_speed = TARGET_TURN_MIN_SPEED + turn_amount * (TARGET_TURN_MAX_SPEED - TARGET_TURN_MIN_SPEED)
+    left_value, right_value = servo_values_for_tank_speeds(
+        turn_direction * turn_speed,
+        -turn_direction * turn_speed,
+    )
+    return left_value, right_value, "TARGET_ALIGN", error, turn_speed
+
+
 def open_arduino_serial():
     if not ENABLE_SERVO_CONTROL or ARDUINO_SERIAL_PORT is None:
         print("Servo serial control disabled. Set ENABLE_SERVO_CONTROL=True and ARDUINO_SERIAL_PORT='COMx' to enable.")
@@ -893,12 +1081,48 @@ def open_arduino_serial():
     return connection
 
 
-def send_servo_values(connection, left_value, right_value):
+def send_servo_values(connection, left_value, right_value, axis_value=SERVO_STOP):
     if connection is None:
         return
-    message = f"L:{left_value} R:{right_value}\n"
+    message = f"L:{left_value} R:{right_value} A:{axis_value}\n"
     connection.write(message.encode("ascii"))
     connection.flush()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Live floor path planner with optional pill-bottle mission mode."
+    )
+    parser.add_argument(
+        "--mission",
+        default="",
+        help="Run as a fetch mission for this item. Arm actions are simulated for now.",
+    )
+    parser.add_argument(
+        "--enable-payload-sequence",
+        action="store_true",
+        default=os.getenv("CORGI_SINGLECAM_PAYLOAD_ENABLED", "").lower() in ("1", "true", "yes", "on"),
+        help="Enable physical D3 winch motion. Leave off until the arm is installed.",
+    )
+    parser.add_argument(
+        "--target-rotate-180",
+        action=argparse.BooleanOptionalAction,
+        default=MISSION_TARGET_ROTATE_180,
+        help="Rotate the side camera image by 180 degrees.",
+    )
+    return parser.parse_args()
+
+
+def run_timed_servo_phase(connection, seconds, left=SERVO_STOP, right=SERVO_STOP, axis=SERVO_STOP, label=""):
+    end_time = time.monotonic() + max(0.0, float(seconds))
+    while time.monotonic() < end_time:
+        send_servo_values(connection, left, right, axis)
+        remaining = end_time - time.monotonic()
+        print(f"{label} {max(0.0, remaining):.1f}s remaining", end="\r")
+        time.sleep(SERIAL_SEND_INTERVAL_SECONDS)
+    send_servo_values(connection, SERVO_STOP, SERVO_STOP, SERVO_STOP)
+    if label:
+        print(f"{label} complete.{' ' * 24}")
 
 
 def draw_path(image, path_points, label):
@@ -966,7 +1190,8 @@ def draw_debug_status(image, floor_mask, safe_mask, grid_safe, path, pitch_degre
     cv2.putText(image, text, (18, FRAME_HEIGHT - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
     if servo_status is not None:
         servo_text = (
-            f"servo L:{servo_status['left']} R:{servo_status['right']} "
+            f"{servo_status.get('mode', 'PATH')} servo L:{servo_status['left']} R:{servo_status['right']} "
+            f"A:{servo_status.get('axis', SERVO_STOP)} "
             f"err:{servo_status['error']:+.2f} corr:{servo_status['correction']:+.1f}"
         )
         cv2.putText(image, servo_text, (18, FRAME_HEIGHT - 42), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
@@ -1045,7 +1270,7 @@ def grid_view_to_bgr(safe_grid, obstacle_grid, grid_path):
     return view
 
 
-def build_display(frame, depth, floor_mask, safe_mask, obstacle_mask, path, grid_safe, grid_obstacle, grid_path, label, pitch_degrees, servo_status, mask_change_held):
+def build_display(frame, depth, floor_mask, safe_mask, obstacle_mask, path, grid_safe, grid_obstacle, grid_path, label, pitch_degrees, servo_status, mask_change_held, target_view=None):
     camera_view = frame.copy()
     if USE_IMAGE_SPACE_PERSPECTIVE_GRID:
         draw_floor_perspective_grid(camera_view, safe_mask)
@@ -1054,6 +1279,7 @@ def build_display(frame, depth, floor_mask, safe_mask, obstacle_mask, path, grid
         draw_perspective_floor_rectangles(camera_view, grid_safe, grid_obstacle, pitch_degrees)
     draw_path(camera_view, path, label)
     draw_debug_status(camera_view, floor_mask, safe_mask, grid_safe, path, pitch_degrees, servo_status, mask_change_held)
+    cv2.putText(camera_view, "FLOOR / PATH CAMERA", (18, 82), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
     depth_view = colorize_depth(depth)
     cv2.putText(depth_view, "DEPTH CLEARANCE", (18, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
@@ -1069,17 +1295,50 @@ def build_display(frame, depth, floor_mask, safe_mask, obstacle_mask, path, grid
         safe_view = grid_view_to_bgr(grid_safe, grid_obstacle, grid_path)
         cv2.putText(safe_view, "TOP-DOWN FLOOR SPACE", (18, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-    top = np.hstack([camera_view, depth_view])
-    bottom = np.hstack([floor_view, safe_view])
-    return np.vstack([top, bottom])
+    if target_view is None:
+        target_view = np.zeros_like(camera_view)
+        cv2.putText(target_view, "TARGET CAMERA OFF", (18, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (80, 80, 255), 2, cv2.LINE_AA)
+    else:
+        target_view = cv2.resize(target_view, (FRAME_WIDTH, FRAME_HEIGHT), interpolation=cv2.INTER_AREA)
+
+    camera_pair = np.hstack([camera_view, target_view])
+    model_pair = np.hstack([depth_view, floor_view])
+    safety_pair = np.hstack([safe_view, np.zeros_like(safe_view)])
+    cv2.putText(safety_pair[:, FRAME_WIDTH:], "RESERVED / ARM STATUS", (FRAME_WIDTH + 18, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (180, 180, 180), 2, cv2.LINE_AA)
+    return np.vstack([camera_pair, model_pair, safety_pair])
 
 
 def main():
+    args = parse_args()
+    mission_mode = bool(args.mission.strip())
+    mission_bottle_stable_frames = 0
+    mission_state = MissionState.PATH_FOLLOWING
+    mission_complete = False
+    if mission_mode:
+        print(f"Mission mode enabled for: {args.mission}")
+        print(f"Physical payload sequence enabled: {args.enable_payload_sequence}")
+        emit_mission_event(
+            mission_state,
+            args.mission,
+            f"following the camera path toward the {args.mission}",
+            0.15,
+        )
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
         depth_processor, depth_model = load_depth_model(device)
         seg_processor, seg_model, traversable_ids = load_segmentation_model(device)
-        capture = open_camera()
+        capture, floor_camera_index = open_camera("floor", CAMERA_INDEX)
+        target_capture = None
+        if ENABLE_TARGET_CAMERA:
+            try:
+                target_capture, _ = open_camera(
+                    "target",
+                    TARGET_CAMERA_INDEX,
+                    excluded_indices=(floor_camera_index,),
+                )
+            except Exception as exc:
+                print(f"Target camera disabled: {exc}")
         servo_connection = open_arduino_serial()
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -1098,6 +1357,8 @@ def main():
     last_servo_send_time = 0.0
     servo_status = None
     mask_change_held = False
+    target_detection = None
+    target_view = None
 
     try:
         while True:
@@ -1107,6 +1368,18 @@ def main():
                 return 1
 
             frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT), interpolation=cv2.INTER_AREA)
+            target_view = None
+            target_detection = None
+            if target_capture is not None:
+                target_ok, target_frame = target_capture.read()
+                if target_ok and target_frame is not None:
+                    target_frame = cv2.resize(
+                        target_frame, (FRAME_WIDTH, FRAME_HEIGHT), interpolation=cv2.INTER_AREA
+                    )
+                    if args.target_rotate_180:
+                        target_frame = cv2.rotate(target_frame, cv2.ROTATE_180)
+                    target_detection, target_mask = detect_orange_bottle(target_frame)
+                    target_view = draw_target_view(target_frame, target_detection, target_mask)
 
             should_infer = frame_index % max(1, INFERENCE_EVERY_N_FRAMES) == 0
             if should_infer or smoothed_depth is None:
@@ -1151,19 +1424,128 @@ def main():
                     smoothed_grid_path = smooth_path(smoothed_grid_path, selected_grid_path)
                 label = direction_from_path(smoothed_path, frame.shape[1])
 
-            left_value, right_value, error, correction = servo_values_from_path(
-                smoothed_path, steering_controller, frame.shape[1]
-            )
+            if mission_mode and mission_state == MissionState.PATH_FOLLOWING and target_detection is not None:
+                mission_state = MissionState.TARGET_CENTERING
+                steering_controller.reset()
+                emit_mission_event(
+                    mission_state, args.mission, f"found the {args.mission}; centering it", 0.45
+                )
+
+            if mission_mode and mission_state == MissionState.TARGET_CENTERING:
+                steering_controller.reset()
+                if target_detection is None:
+                    left_value = right_value = SERVO_STOP
+                    error = correction = 0.0
+                    mode = "TARGET_LOST_STOP"
+                    mission_bottle_stable_frames = 0
+                else:
+                    error_pixels = float(target_detection["error_pixels"])
+                    error = float(np.clip(error_pixels / (FRAME_WIDTH / 2.0), -1.0, 1.0))
+                    if abs(error_pixels) <= MISSION_TARGET_CENTER_DEADBAND_PIXELS:
+                        left_value = right_value = SERVO_STOP
+                        correction = 0.0
+                        mode = "TARGET_CENTERED_STOP"
+                        mission_bottle_stable_frames += 1
+                    else:
+                        mission_bottle_stable_frames = 0
+                        speed = float(np.clip(
+                            abs(error) * MISSION_TARGET_FB_KP,
+                            MISSION_TARGET_FB_MIN_SPEED,
+                            MISSION_TARGET_FB_MAX_SPEED,
+                        ))
+                        speed *= MISSION_TARGET_FB_SIGN * (1.0 if error > 0.0 else -1.0)
+                        left_value, right_value = servo_values_for_tank_speeds(speed, speed)
+                        correction = speed
+                        mode = "TARGET_FB_CENTER"
+
+                if mission_bottle_stable_frames >= MISSION_TARGET_CENTER_STABLE_FRAMES:
+                    mission_state = MissionState.TARGET_LOCKED
+                    send_servo_values(servo_connection, SERVO_STOP, SERVO_STOP, SERVO_STOP)
+                    emit_mission_event(
+                        mission_state, args.mission, f"centered on the {args.mission}", 0.58
+                    )
+                    mission_state = MissionState.ARM_PICK_PLACEHOLDER
+                    emit_mission_event(
+                        mission_state, args.mission,
+                        "arm pickup placeholder; physical arm is not installed", 0.66, simulated=True
+                    )
+                    time.sleep(MISSION_ARM_PICK_SECONDS)
+                    if args.enable_payload_sequence:
+                        mission_state = MissionState.WINCH_UP
+                        emit_mission_event(mission_state, args.mission, "raising the arm", 0.74)
+                        run_timed_servo_phase(
+                            servo_connection, MISSION_WINCH_UP_SECONDS,
+                            axis=MISSION_AXIS_UP_VALUE, label="Winch up"
+                        )
+                    else:
+                        emit_mission_event(
+                            MissionState.WINCH_UP, args.mission,
+                            "winch-up dry run; payload sequence is disabled", 0.74, simulated=True
+                        )
+                    mission_state = MissionState.BASKET_DROP_PLACEHOLDER
+                    emit_mission_event(
+                        mission_state, args.mission,
+                        "basket drop placeholder; physical arm is not installed", 0.82, simulated=True
+                    )
+                    time.sleep(MISSION_BASKET_DROP_SECONDS)
+                    if args.enable_payload_sequence:
+                        mission_state = MissionState.WINCH_DOWN
+                        emit_mission_event(mission_state, args.mission, "lowering the arm", 0.9)
+                        run_timed_servo_phase(
+                            servo_connection, MISSION_WINCH_DOWN_SECONDS,
+                            axis=MISSION_AXIS_DOWN_VALUE, label="Winch down"
+                        )
+                    else:
+                        emit_mission_event(
+                            MissionState.WINCH_DOWN, args.mission,
+                            "winch-down dry run; payload sequence is disabled", 0.9, simulated=True
+                        )
+                    mission_state = MissionState.RESUMING_PATH
+                    mission_resume_until = time.monotonic() + MISSION_RESUME_PATH_SECONDS
+                    emit_mission_event(
+                        mission_state, args.mission, "resuming the planned path", 0.96
+                    )
+                    mission_bottle_stable_frames = 0
+
+            if mission_mode and mission_state in (
+                MissionState.TARGET_LOCKED,
+                MissionState.ARM_PICK_PLACEHOLDER,
+                MissionState.WINCH_UP,
+                MissionState.BASKET_DROP_PLACEHOLDER,
+                MissionState.WINCH_DOWN,
+            ):
+                left_value = right_value = SERVO_STOP
+                error = correction = 0.0
+                mode = mission_state.value
+            elif mission_mode and mission_state == MissionState.RESUMING_PATH:
+                left_value, right_value, error, correction = servo_values_from_path(
+                    smoothed_path, steering_controller, frame.shape[1]
+                )
+                mode = "PATH"
+                if time.monotonic() >= mission_resume_until:
+                    mission_state = MissionState.COMPLETE
+                    mission_complete = True
+                    emit_mission_event(
+                        mission_state, args.mission, f"camera mission for {args.mission} complete", 1.0
+                    )
+            elif not (mission_mode and mission_state == MissionState.TARGET_CENTERING):
+                left_value, right_value, error, correction = servo_values_from_path(
+                    smoothed_path, steering_controller, frame.shape[1]
+                )
+                mode = "PATH"
+            axis_value = SERVO_STOP
             servo_status = {
                 "left": left_value,
                 "right": right_value,
+                "axis": axis_value,
                 "error": error,
                 "correction": correction,
+                "mode": mode,
             }
 
             now = time.monotonic()
             if now - last_servo_send_time >= SERIAL_SEND_INTERVAL_SECONDS:
-                send_servo_values(servo_connection, left_value, right_value)
+                send_servo_values(servo_connection, left_value, right_value, axis_value)
                 last_servo_send_time = now
 
             display = build_display(
@@ -1180,8 +1562,12 @@ def main():
                 selected_pitch_degrees,
                 servo_status,
                 mask_change_held,
+                target_view,
             )
             cv2.imshow("Depth + SegFormer Safe Path - press Q or Esc to quit", display)
+
+            if mission_complete:
+                break
 
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), ord("Q"), 27):
@@ -1192,12 +1578,16 @@ def main():
     except KeyboardInterrupt:
         pass
     except Exception as exc:
+        if mission_mode:
+            emit_mission_event(MissionState.FAILED, args.mission, str(exc), 1.0)
         print(f"ERROR: Runtime failure: {exc}", file=sys.stderr)
         return 1
     finally:
         if "servo_connection" in locals() and servo_connection is not None:
-            send_servo_values(servo_connection, SERVO_STOP, SERVO_STOP)
+            send_servo_values(servo_connection, SERVO_STOP, SERVO_STOP, SERVO_STOP)
             servo_connection.close()
+        if "target_capture" in locals() and target_capture is not None:
+            target_capture.release()
         capture.release()
         cv2.destroyAllWindows()
 

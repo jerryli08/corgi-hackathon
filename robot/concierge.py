@@ -29,6 +29,8 @@ from robot.config import (
     BASKET_CAPACITY,
     PERSON_LABEL,
     ROUTER_MAX_CHARS,
+    SINGLECAM_MISSION_ENABLED,
+    SINGLECAM_MISSION_ITEM_KEYWORDS,
 )
 from robot.events import EventBus
 from robot.messaging import InboundMessage, Outbox
@@ -88,6 +90,13 @@ KNOWN_ITEMS: tuple[str, ...] = tuple(k for k in HSV_PROFILES if k not in NOT_FET
 ROUTE_LIMIT = 64
 CONTACT_LIMIT = 32
 RECENT_LIMIT = 40
+
+
+def _singlecam_can_fetch(item: str) -> bool:
+    if not SINGLECAM_MISSION_ENABLED:
+        return False
+    text = item.strip().lower()
+    return any(keyword.lower() in text for keyword in SINGLECAM_MISSION_ITEM_KEYWORDS)
 
 
 @dataclass
@@ -293,14 +302,14 @@ class Concierge:
         return _Outcome("chat", intent.reply or CHAT_FALLBACK)
 
     def _fetch(self, intent: Intent, contact: Contact, msg: InboundMessage) -> _Outcome:
-        if self.skills is None:
+        item = (intent.item or "").strip()
+        if self.skills is None and not _singlecam_can_fetch(item):
             return _Outcome("refused", REFUSE_NO_CAMERA)
         if self.walker is not None and self.walker.active:
             return _Outcome("refused", REFUSE_WALKING)
-        if len(self.skills.basket) >= BASKET_CAPACITY:
+        if self.skills is not None and len(self.skills.basket) >= BASKET_CAPACITY:
             return _Outcome("refused", REFUSE_BASKET_FULL)
 
-        item = (intent.item or "").strip()
         if not item:
             contact.pending_clarification = intent.raw[:ROUTER_MAX_CHARS] or msg.text
             return _Outcome("asked", ASK_WHICH)
@@ -379,6 +388,13 @@ class Concierge:
         if self.skills is not None:
             try:
                 await self.skills.cancel_current()
+            except Exception as exc:
+                self.last_error = repr(exc)
+        if SINGLECAM_MISSION_ENABLED:
+            try:
+                from robot.singlecam_mission import singlecam_mission
+
+                await singlecam_mission.stop()
             except Exception as exc:
                 self.last_error = repr(exc)
         for order in self.orders.list():
