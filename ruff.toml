@@ -1,0 +1,36 @@
+# Without this file `ruff check` runs whatever the installed version defaults to, which
+# is why the codebase had `# noqa` comments for rules that were not switched on. Pin the
+# set so "ruff is clean" means something and stays reachable.
+
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = [
+    "E",      # pycodestyle
+    "W",
+    "F",      # pyflakes
+    "I",      # import sorting
+    "UP",     # pyupgrade
+    "B",      # bugbear
+    "SIM",    # simplify
+    "C4",     # comprehensions
+    "ASYNC",  # blocking calls in async code -- the one that actually bites here
+    "RUF",
+]
+ignore = [
+    # This robot is built to degrade rather than fall over. A dead serial link, a
+    # missing camera, an arm that will not home, a router outage and a sidecar that is
+    # not running all have to be swallowed at the boundary and reported as a boot note
+    # or a dropped text. That is the design, stated once here rather than as a `noqa`
+    # on each of the dozen sites that implement it.
+    "BLE001",
+    # The router has to match what a phone actually sends, and iOS autocorrects a typed
+    # apostrophe into U+2019. Those characters are the point, not a mistake.
+    "RUF001",
+]
+
+[lint.per-file-ignores]
+# The environment has to be pinned before the first `robot.*` import, because
+# robot/config.py reads os.environ at import time and there is one chance to get it right.
+"tests/conftest.py" = ["E402"]

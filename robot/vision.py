@@ -21,6 +21,7 @@ import numpy as np
 
 from robot.config import (
     HOME_TAG_LABEL,
+    PERSON_LABEL,
     VISION_BACKEND,
     VLM_MAX_EDGE,
     VLM_MODEL,
@@ -61,8 +62,16 @@ HSV_PROFILES: dict[str, tuple[int, int, int, int]] = {
     "granola bar": (10, 20, 80, 60),
     "water bottle": (85, 100, 60, 100),
     HOME_TAG_LABEL: (140, 165, 100, 90),
+    # A blue shirt, deliberately clear of the water bottle's band just below it. On
+    # hardware retune this to whatever the person is actually wearing, or run the VLM
+    # backend, which does not need a colour at all.
+    PERSON_LABEL: (103, 125, 80, 90),
 }
 MIN_BLOB_AREA_PX = 250
+
+# Neither of these is something a person can ask the robot to fetch, so they are
+# excluded from the guess-what-they-meant fallback below.
+NOT_FETCHABLE = (HOME_TAG_LABEL, PERSON_LABEL)
 
 
 def _largest_blob(frame: np.ndarray, profile) -> Detection | None:
@@ -112,8 +121,8 @@ class ColorVision:
     async def locate(self, frame: np.ndarray, query: str) -> Detection | None:
         profile = _match_profile(query)
         if profile is None:
-            # unknown label: fall back to whatever is biggest and not the tag
-            candidates = [d for d in await self.scene(frame) if d.label != HOME_TAG_LABEL]
+            # unknown label: fall back to whatever is biggest and actually fetchable
+            candidates = [d for d in await self.scene(frame) if d.label not in NOT_FETCHABLE]
             best = max(candidates, key=lambda d: d.height, default=None)
             return Detection(query, best.bbox, best.conf) if best else None
         det = _largest_blob(frame, profile)

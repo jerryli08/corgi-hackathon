@@ -54,6 +54,12 @@ class Body:
     async def gripper(self, state: str) -> bool:
         return await asyncio.to_thread(self.arm.set_gripper, state)
 
+    async def stow(self) -> None:
+        await asyncio.to_thread(self.arm.stow)
+
+    async def unstow(self) -> bool:
+        return await asyncio.to_thread(self.arm.unstow)
+
     # -- base -------------------------------------------------------------
     async def drive(self, linear: float = 0.0, angular: float = 0.0, ms: int = STEP_MS) -> None:
         await asyncio.to_thread(self.drive_base.drive_velocity, linear, angular, ms)
@@ -91,7 +97,7 @@ def make_body(mock: bool = MOCK) -> tuple[Body, list[str]]:
         try:
             port = drive.connect()
             notes.append(f"drive connected on {port}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             notes.append(f"drive not connected: {exc}")
 
     arm = make_arm(mock=mock, enabled=ARM_ENABLED or mock)
@@ -102,7 +108,7 @@ def make_body(mock: bool = MOCK) -> tuple[Body, list[str]]:
     if CAMERA_ENABLED:
         try:
             camera = make_camera(mock)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             notes.append(f"camera unavailable: {exc}")
     else:
         notes.append("camera disabled")

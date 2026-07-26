@@ -29,6 +29,10 @@ def _int(name: str, default: int) -> int:
     return int(os.getenv(name, str(default)))
 
 
+def _csv(name: str, default: str = "") -> list[str]:
+    return [part.strip() for part in os.getenv(name, default).split(",") if part.strip()]
+
+
 # --- Mode -----------------------------------------------------------------
 # MOCK=1 runs the whole stack against a simulated robot and a synthetic camera,
 # so the server, the skills and the web UI all work with nothing plugged in.
@@ -131,3 +135,78 @@ REACH_BUCKETS = [(0.40, "near"), (0.30, "mid"), (0.0, "far")]
 HOME_TAG_ID = _int("CORGI_HOME_TAG_ID", 0)
 HOME_TAG_LABEL = "home_tag"
 DELIVER_SWEET_SPOT_H = _num("CORGI_DELIVER_SWEET_SPOT_H", 0.45)
+
+# --- Messaging (Photon / iMessage) ----------------------------------------
+# log         = print and record, no network. The default, and what the tests use.
+# photon      = Photon Spectrum, through the Node sidecar in bridge/ (outbound only;
+#               inbound arrives on the webhook below).
+# applescript = the Messages app on this Mac via osascript. No account, no keys,
+#               genuinely iMessage; the fallback when the sidecar is not running.
+MESSAGING_BACKEND = os.getenv("CORGI_MESSAGING_BACKEND", "log")
+PHOTON_BRIDGE_URL = os.getenv("CORGI_PHOTON_BRIDGE_URL", "http://127.0.0.1:8787")
+PHOTON_BRIDGE_TIMEOUT_S = _num("CORGI_PHOTON_BRIDGE_TIMEOUT_S", 6.0)
+# Spectrum's webhook signing secret. It is shown once, when the webhook is registered.
+PHOTON_WEBHOOK_SECRET = os.getenv("CORGI_PHOTON_WEBHOOK_SECRET", "")
+# Refuse unsigned webhooks. Only turn this off to poke at the endpoint by hand.
+PHOTON_REQUIRE_SIGNATURE = _flag("CORGI_PHOTON_REQUIRE_SIGNATURE", "1")
+PHOTON_WEBHOOK_TOLERANCE_S = _int("CORGI_PHOTON_WEBHOOK_TOLERANCE_S", 300)
+
+# Blank = answer anyone. Otherwise an allowlist of E.164 numbers; anyone else gets one
+# polite refusal and is then ignored.
+ALLOWED_SENDERS = _csv("CORGI_ALLOWED_SENDERS")
+# Photon's default quota is 5000 messages per server per day. We are nowhere near it,
+# but an elderly user must never get nine texts about one water bottle, so cap it hard.
+DAILY_MESSAGE_BUDGET = _int("CORGI_DAILY_MESSAGE_BUDGET", 200)
+TEXT_MIN_GAP_S = _num("CORGI_TEXT_MIN_GAP_S", 6.0)
+# Let the browser's phone simulator inject messages. This is the whole unplugged demo.
+ALLOW_SIMULATED_TEXTS = _flag("CORGI_ALLOW_SIMULATED_TEXTS", "1")
+
+# --- Router (Merge Gateway) -----------------------------------------------
+# keyword = deterministic, offline, and the fallback for every merge failure.
+# merge   = Merge Gateway, which is itself routing across providers underneath us.
+ROUTER_BACKEND = os.getenv("CORGI_ROUTER_BACKEND", "keyword")
+MERGE_BASE_URL = os.getenv("CORGI_MERGE_BASE_URL", "https://api-gateway.merge.dev/v1")
+# responses = Merge's native API, which reports back which vendor and tier served the
+#             call. That is the interesting part, so it is the default.
+# openai    = the OpenAI-compatible shim at {base}/openai/chat/completions.
+MERGE_API = os.getenv("CORGI_MERGE_API", "responses")
+MERGE_API_KEY = os.getenv("MERGE_API_KEY", "")
+# Two tiers. A short command ("water please") never needs more than the fast one.
+# These are catalogue ids and they move: `python scripts/check_router.py` prints what
+# your key can actually reach, rather than making you guess.
+ROUTER_FAST_MODEL = os.getenv("CORGI_ROUTER_FAST_MODEL", "anthropic/claude-haiku-4-5-20251001")
+ROUTER_DEEP_MODEL = os.getenv("CORGI_ROUTER_DEEP_MODEL", "anthropic/claude-sonnet-5")
+ROUTER_FAST_TIER = os.getenv("CORGI_ROUTER_FAST_TIER", "flex")  # merge service_tier
+ROUTER_DEEP_TIER = os.getenv("CORGI_ROUTER_DEEP_TIER", "standard")
+ROUTER_TIMEOUT_S = _num("CORGI_ROUTER_TIMEOUT_S", 8.0)
+# Below this the fast model's answer is not trusted and the deep model gets a turn.
+ROUTER_CONFIDENCE_FLOOR = _num("CORGI_ROUTER_CONFIDENCE_FLOOR", 0.65)
+ROUTER_MAX_CHARS = _int("CORGI_ROUTER_MAX_CHARS", 600)
+
+# --- Coming to a person ---------------------------------------------------
+# Stop further out than a grasp: this ends up beside someone, not against them.
+COME_SWEET_SPOT_H = _num("CORGI_COME_SWEET_SPOT_H", 0.62)
+COME_TOL_H = _num("CORGI_COME_TOL_H", 0.06)
+PERSON_LABEL = os.getenv("CORGI_PERSON_LABEL", "person")
+# A standing person's bbox is taller than it is wide. A chair's is not. The cheapest
+# possible guard against a VLM confidently boxing the furniture.
+PERSON_MIN_ASPECT = _num("CORGI_PERSON_MIN_ASPECT", 1.15)
+
+# --- Walking alongside someone -------------------------------------------
+# NOT a mobility aid and NOT load-bearing: the base weighs a couple of kilos and runs
+# on hobby servos. This is a paced escort with a handhold reference at a known height.
+# Half speed, because the point is to be predictable next to someone unsteady.
+WALK_LINEAR = _num("CORGI_WALK_LINEAR", 0.12)  # m/s
+WALK_ANGULAR = _num("CORGI_WALK_ANGULAR", 0.5)  # rad/s
+WALK_STEP_MS = _int("CORGI_WALK_STEP_MS", 250)
+# Dead-man: the wheels move only while instructions keep arriving. Miss one and stop.
+# This is what makes an open-loop hobby-servo base acceptable next to a person.
+WALK_DEADMAN_MS = _int("CORGI_WALK_DEADMAN_MS", 1200)
+# And the mode itself times out, so a forgotten session does not idle with the arm out.
+WALK_MAX_S = _num("CORGI_WALK_MAX_S", 300.0)
+# Pause and re-look for the person every this many steps.
+WALK_RECHECK_STEPS = _int("CORGI_WALK_RECHECK_STEPS", 12)
+
+# --- Basket ---------------------------------------------------------------
+# What the robot can carry aboard at once. The arm stows into it and lifts back out.
+BASKET_CAPACITY = _int("CORGI_BASKET_CAPACITY", 3)

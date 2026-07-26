@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CORGI</title>
+    <title>CORGI — a robot you text</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -14,38 +14,84 @@
   </head>
   <body>
     <main class="stage">
-      <p class="brand">CORGI</p>
-      <h1>What should we grab?</h1>
-      <p class="lede">Tell the robot an item. It queues the run and heads for the shelf.</p>
+      <header class="head">
+        <p class="brand">CORGI</p>
+        <h1>Text me what you need.</h1>
+        <p class="lede">
+          Ask for something and I'll fetch it and bring it over. Say
+          <em>come here</em> and I'll come to you.
+        </p>
+      </header>
 
-      <form id="order-form" autocomplete="off">
-        <label class="sr-only" for="item">Grocery item</label>
-        <input
-          id="item"
-          name="item"
-          type="text"
-          placeholder="e.g. Honey Nut Cheerios"
-          maxlength="80"
-          required
-        />
-        <button type="submit">Send robot</button>
-      </form>
+      <!-- The phone. On the real thing these messages arrive over iMessage; here the
+           same handler runs with the phone replaced by this panel. -->
+      <section class="phone" aria-labelledby="thread-title">
+        <h2 id="thread-title" class="panel-title">Messages</h2>
+        <ol id="thread" class="thread" aria-live="polite" aria-atomic="false">
+          <li class="bubble robot empty">
+            Text me what you need — for example, <em>bring me my water bottle</em>.
+          </li>
+        </ol>
 
-      <p id="status" class="status" aria-live="polite"></p>
+        <form id="text-form" autocomplete="off">
+          <label class="sr-only" for="message">Message to the robot</label>
+          <input
+            id="message"
+            name="message"
+            type="text"
+            placeholder="bring me my water bottle"
+            maxlength="600"
+            required
+            enterkeyhint="send"
+          />
+          <button type="submit">Send</button>
+        </form>
+        <p id="status" class="status" role="status"></p>
+      </section>
 
-      <section id="live" class="live" hidden>
-        <div class="live-head">
+      <!-- What it is doing right now. Deliberately not a text message: this changes
+           every few seconds and nobody wants a text per phase. -->
+      <section id="live" class="live" aria-labelledby="live-title" hidden>
+        <h2 id="live-title" class="panel-title">Right now</h2>
+        <p class="live-head">
           <span class="dot" aria-hidden="true"></span>
-          <span id="live-phase">standing by</span>
-        </div>
+          <span id="live-phase" aria-live="polite">standing by</span>
+        </p>
         <div class="track"><div id="live-bar" class="bar"></div></div>
         <figure class="viewport">
           <img id="cam" alt="Live view from the robot's camera" />
-          <figcaption>robot's eye view</figcaption>
+          <figcaption>what the robot sees</figcaption>
         </figure>
+        <p id="basket" class="basket" hidden></p>
       </section>
 
-      <ul id="orders" class="orders"></ul>
+      <section class="walk" aria-labelledby="walk-title">
+        <h2 id="walk-title" class="panel-title">Walk with me</h2>
+        <p id="walk-state" class="walk-state">Not walking.</p>
+        <div class="pad">
+          <button class="jog up" data-direction="forward" type="button">
+            <span aria-hidden="true">↑</span><span class="key">Forward</span>
+          </button>
+          <button class="jog left" data-direction="left" type="button">
+            <span aria-hidden="true">←</span><span class="key">Left</span>
+          </button>
+          <button class="jog right" data-direction="right" type="button">
+            <span aria-hidden="true">→</span><span class="key">Right</span>
+          </button>
+          <button class="jog down" data-direction="back" type="button">
+            <span aria-hidden="true">↓</span><span class="key">Back</span>
+          </button>
+        </div>
+        <div class="walk-actions">
+          <button id="walk-start" class="secondary" type="button">Start walking</button>
+          <button id="walk-stop" class="danger" type="button">Stop</button>
+        </div>
+        <p class="caveat">
+          Hold a button and I move while you hold it. Let go and I stop.
+          <strong>I keep pace beside you and give you something to steady a hand on —
+          I am not strong enough to lean on, so please don't put your weight on me.</strong>
+        </p>
+      </section>
 
       <footer class="foot">
         <span id="rig" class="rig"></span>

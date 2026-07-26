@@ -23,7 +23,7 @@ def main() -> int:
             ["system_profiler", "SPCameraDataType"], text=True, stderr=subprocess.DEVNULL
         )
         print(out.strip() or "(none)")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"could not query cameras: {exc}")
 
     print("\nTip: plug Arduino, SO-101 bus, and C920 into the USB hub, then re-run.")

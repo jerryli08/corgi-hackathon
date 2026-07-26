@@ -1,29 +1,58 @@
-"""Wireless order API, customer UI and ops console for the Corgi grocery robot.
+"""The API, the resident's page and the ops console for a robot you text.
 
 One process on the Mac holds everything: the serial link to the drive base, the camera,
-the arm, perception, the skill state machine and the web server. Split it up later if
-it ever needs to be; today the whole robot is `python -m robot.server`.
+the arm, perception, the skill state machine, the iMessage transport, the router that
+reads the messages, and the web server. Split it up later if it ever needs to be; today
+the whole robot is `python -m robot.server`.
+
+Two entry points matter. `POST /api/imessage/webhook` is how a real text arrives, and
+`POST /api/imessage/simulate` is the same path with the phone replaced by a browser --
+which is what makes the whole thing demoable with nothing plugged in.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from robot.body import make_body
-from robot.config import HOST, MOCK, PORT, STEP_MS, VISION_BACKEND
+from robot.brain import RouterContext, make_router
+from robot.concierge import Concierge
+from robot.config import (
+    ALLOW_SIMULATED_TEXTS,
+    HOST,
+    MOCK,
+    PHOTON_REQUIRE_SIGNATURE,
+    PHOTON_WEBHOOK_SECRET,
+    PORT,
+    STEP_MS,
+    VISION_BACKEND,
+)
 from robot.drive import list_serial_ports
 from robot.events import EventBus
+from robot.messaging import (
+    HEADER_SIGNATURE,
+    HEADER_TIMESTAMP,
+    InboundMessage,
+    Outbox,
+    SignatureError,
+    make_messenger,
+    parse_spectrum_webhook,
+    verify_spectrum_signature,
+)
 from robot.orders import Order, OrderService, stub_fulfill
 from robot.skills import Skills
-from robot.vision import make_vision
+from robot.vision import HSV_PROFILES, NOT_FETCHABLE, make_vision
+from robot.walker import WalkerMode
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
@@ -34,10 +63,39 @@ vision = make_vision() if body.has_camera else None
 skills = Skills(body=body, vision=vision, bus=bus) if vision else None
 orders = OrderService(bus=bus)
 
+# The texting half of the robot. Both halves degrade to something that still boots:
+# no key means the keyword router, no bridge means texts printed to the console.
+messenger, _messaging_notes = make_messenger()
+outbox = Outbox(messenger)
+router, _router_notes = make_router()
+walker = WalkerMode(body=body, bus=bus, skills=skills)
+concierge = Concierge(
+    router=router, outbox=outbox, orders=orders, skills=skills, walker=walker, bus=bus
+)
+BOOT_NOTES.extend(_messaging_notes)
+BOOT_NOTES.extend(_router_notes)
+
+# Held so the phase-follower task is not garbage collected mid-flight.
+_background: list[asyncio.Task] = []
+
 
 async def fulfill(order: Order) -> tuple[bool, str]:
     assert skills is not None
     return await skills.fetch_and_deliver(order.item, order_id=order.id)
+
+
+def _router_context() -> RouterContext:
+    """What the router is told about the robot before it reads a message."""
+    current = orders.current
+    return RouterContext(
+        busy=current is not None,
+        phase=skills.phase if skills else "IDLE",
+        carrying=skills.carrying if skills else None,
+        basket=list(skills.basket) if skills else [],
+        known_items=[k for k in HSV_PROFILES if k not in NOT_FETCHABLE],
+        last_item=current.item if current else None,
+        walking=walker.active,
+    )
 
 
 @asynccontextmanager
@@ -48,18 +106,33 @@ async def lifespan(_: FastAPI):
         BOOT_NOTES.append("no perception: orders are simulated until a camera is attached")
         orders.set_fulfill(stub_fulfill)
     orders.start()
+    _background.append(asyncio.create_task(concierge.follow_phases()))
 
-    print(f"[corgi] mock={MOCK} vision={VISION_BACKEND} arm={body.arm.present}")
+    print(
+        f"[corgi] mock={MOCK} vision={VISION_BACKEND} arm={body.arm.present} "
+        f"router={router.name} messaging={messenger.name}"
+    )
     for note in BOOT_NOTES:
         print(f"[corgi] {note}")
 
     yield
 
+    for task in _background:
+        task.cancel()
+    for task in _background:
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+    _background.clear()
     await orders.stop()
+    with contextlib.suppress(Exception):
+        await walker.stop(reason="shutting down")
     if skills is not None:
         await skills.cancel_current()
     with contextlib.suppress(Exception):
         await body.estop()
+    for closer in (outbox.aclose, router.aclose):
+        with contextlib.suppress(Exception):
+            await closer()
     if vision is not None:
         with contextlib.suppress(Exception):
             await vision.aclose()
@@ -115,6 +188,25 @@ class FetchIn(BaseModel):
     label: str = Field(min_length=1, max_length=80)
 
 
+class SimulateIn(BaseModel):
+    """A text, as if it had arrived from a phone. The browser and the tests use this."""
+
+    text: str = Field(min_length=1, max_length=600)
+    sender: str = Field(default="+15550000000", max_length=40, alias="from")
+    space_id: str = Field(default="sim", max_length=80)
+
+    model_config = {"populate_by_name": True}
+
+
+class RouterPreviewIn(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+
+
+class NudgeIn(BaseModel):
+    direction: str
+    ms: int | None = Field(default=None, ge=1, le=2000)
+
+
 def _order_out(order: Order) -> OrderOut:
     return OrderOut(
         id=order.id,
@@ -150,6 +242,10 @@ def health():
         "arm_present": body.arm.present,
         "camera_present": body.has_camera,
         "vision_backend": VISION_BACKEND if vision else None,
+        "messaging": outbox.stats(),
+        "router": {"backend": router.name},
+        "walker": walker.state(),
+        "basket": list(skills.basket) if skills else [],
         "notes": BOOT_NOTES,
         "serial_ports": [{"device": d, "description": desc} for d, desc in list_serial_ports()],
     }
@@ -159,9 +255,10 @@ def health():
 def state():
     current = orders.current
     return {
-        "robot": skills.state() if skills else {"phase": "IDLE", "carrying": None},
+        "robot": skills.state() if skills else {"phase": "IDLE", "carrying": None, "basket": []},
         "current_order": current.as_dict() if current else None,
         "queued": sum(1 for o in orders.list() if o.status.value == "queued"),
+        "walker": walker.state(),
     }
 
 
@@ -241,19 +338,37 @@ async def skills_locate(payload: LocateIn):
     }
 
 
+def _start_skill(factory):
+    """Skills.start() refuses a second skill while one is live rather than silently
+    queuing it -- queuing was how e-stop used to end up cancelling the wrong task."""
+    try:
+        return factory().as_dict()
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @app.post("/api/skills/fetch")
 async def skills_fetch(payload: FetchIn):
-    return _require_skills().fetch(payload.label).as_dict()
+    skills = _require_skills()
+    return _start_skill(lambda: skills.fetch(payload.label))
+
+
+@app.post("/api/skills/come")
+async def skills_come():
+    skills = _require_skills()
+    return _start_skill(skills.come)
 
 
 @app.post("/api/skills/deliver")
 async def skills_deliver():
-    return _require_skills().deliver().as_dict()
+    skills = _require_skills()
+    return _start_skill(skills.deliver)
 
 
 @app.post("/api/skills/return_item")
 async def skills_return_item():
-    return _require_skills().return_item().as_dict()
+    skills = _require_skills()
+    return _start_skill(skills.return_item)
 
 
 @app.get("/api/tasks/{task_id}")
@@ -262,6 +377,116 @@ async def task_status(task_id: str):
     if task is None:
         raise HTTPException(404, "no such task")
     return task.as_dict()
+
+
+# --------------------------------------------------------------------------
+# iMessage: the way an actual person talks to this robot
+# --------------------------------------------------------------------------
+@app.post("/api/imessage/webhook")
+async def imessage_webhook(request: Request):
+    """Inbound texts from Photon (Spectrum).
+
+    The signature is over the raw body, so this reads bytes before it reads JSON. A
+    webhook we do not act on -- a reaction, an attachment, an outbound echo -- answers
+    200: Spectrum retries anything else, and there is nothing here to retry.
+    """
+    raw = await request.body()
+
+    if PHOTON_REQUIRE_SIGNATURE:
+        try:
+            verify_spectrum_signature(
+                raw,
+                timestamp=request.headers.get(HEADER_TIMESTAMP),
+                signature=request.headers.get(HEADER_SIGNATURE),
+                secret=PHOTON_WEBHOOK_SECRET,
+            )
+        except SignatureError as exc:
+            raise HTTPException(401, str(exc)) from exc
+
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError:
+        return {"ignored": True, "reason": "body is not JSON"}
+    if not isinstance(payload, dict):
+        return {"ignored": True, "reason": "body is not a JSON object"}
+
+    msg = parse_spectrum_webhook(payload)
+    if msg is None:
+        return {"ignored": True, "reason": "not an inbound text message"}
+    return await concierge.handle(msg)
+
+
+@app.post("/api/imessage/simulate")
+async def imessage_simulate(payload: SimulateIn):
+    """The same path as a real text, minus the phone. This is the unplugged demo."""
+    if not ALLOW_SIMULATED_TEXTS:
+        raise HTTPException(403, "simulated texts are disabled (CORGI_ALLOW_SIMULATED_TEXTS=0)")
+    return await concierge.handle(
+        InboundMessage(
+            id=f"sim_{uuid.uuid4().hex[:8]}",
+            sender=payload.sender,
+            space_id=payload.space_id,
+            text=payload.text,
+            simulated=True,
+        )
+    )
+
+
+@app.get("/api/imessage/log")
+def imessage_log(limit: int = 40):
+    return {
+        "inbound": concierge.recent(),
+        "outbound": outbox.recent(limit),
+        "stats": outbox.stats(),
+    }
+
+
+@app.get("/api/contacts")
+def contacts():
+    return {"contacts": concierge.contacts()}
+
+
+@app.post("/api/router/preview")
+async def router_preview(payload: RouterPreviewIn):
+    """Route a message and report the decision without acting on it.
+
+    Nothing is dispatched and no text is sent. It is the honest way to show what the
+    router did with a sentence, on stage, without moving the robot.
+    """
+    intent = await router.route(payload.text, _router_context())
+    return intent.as_dict()
+
+
+# --------------------------------------------------------------------------
+# walking alongside someone
+# --------------------------------------------------------------------------
+@app.post("/api/walker/start")
+async def walker_start():
+    ok = await walker.start(reason="requested")
+    return {"ok": ok, "state": walker.state()}
+
+
+@app.post("/api/walker/nudge")
+async def walker_nudge(payload: NudgeIn):
+    ok = await walker.nudge(payload.direction, payload.ms)
+    return {"ok": ok, "state": walker.state()}
+
+
+@app.post("/api/walker/hold")
+async def walker_hold():
+    await walker.hold()
+    return {"ok": True, "state": walker.state()}
+
+
+@app.post("/api/walker/stop")
+async def walker_stop():
+    await walker.stop(reason="asked to stop")
+    return {"ok": True, "state": walker.state()}
+
+
+@app.get("/api/walker/state")
+def walker_state():
+    return walker.state()
 
 
 # --------------------------------------------------------------------------
@@ -313,6 +538,9 @@ def arm_state():
 
 @app.post("/api/estop")
 async def estop():
+    # Walker mode first: it is the one thing here holding a loop that will happily
+    # re-issue a drive command a moment after the wheels have been stopped.
+    await walker.stop(reason="e-stop")
     if skills is not None:
         await skills.cancel_current()
     await body.estop()
@@ -368,6 +596,7 @@ def debug_reset(grasp_failure_rate: float | None = None):
         WORLD.grasp_failure_rate = max(0.0, min(1.0, grasp_failure_rate))
     if skills is not None:
         skills.carrying = None
+        skills.basket.clear()
     return {"ok": True, "grasp_failure_rate": WORLD.grasp_failure_rate}
 
 

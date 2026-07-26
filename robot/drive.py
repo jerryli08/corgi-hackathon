@@ -12,6 +12,7 @@ Two things matter here beyond the serial plumbing:
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from dataclasses import dataclass
@@ -85,8 +86,8 @@ def velocity_to_us(linear: float, angular: float) -> tuple[int, int]:
         right *= full_scale / biggest
 
     return (
-        int(round(STOP_US + FULL_SCALE_US * left / full_scale)),
-        int(round(STOP_US + FULL_SCALE_US * right / full_scale)),
+        round(STOP_US + FULL_SCALE_US * left / full_scale),
+        round(STOP_US + FULL_SCALE_US * right / full_scale),
     )
 
 
@@ -201,10 +202,8 @@ class DriveBase(DriveController):
     def close(self) -> None:
         super().close()
         if self._ser and self._ser.is_open:
-            try:
+            with contextlib.suppress(Exception):
                 self._write_us(STOP_US, STOP_US)
-            except Exception:
-                pass
             self._ser.close()
         self._ser = None
 

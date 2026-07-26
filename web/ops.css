@@ -151,6 +151,85 @@ input {
   white-space: pre-wrap;
 }
 
+.mute {
+  color: var(--mute);
+}
+
+.hint {
+  margin: 0.55rem 0 0;
+  color: var(--mute);
+  font-size: 0.75rem;
+}
+
+.stat {
+  margin: 0.7rem 0 0;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+/* Router decisions and the message log: one row per event, dense but scannable. */
+.rows {
+  margin-top: 0.7rem;
+  max-height: 18rem;
+  overflow: auto;
+  background: #0a0a0c;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.rows:empty::after {
+  content: "nothing yet";
+  display: block;
+  padding: 0.6rem 0.7rem;
+  color: var(--mute);
+}
+
+.row {
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row .said {
+  color: var(--ink);
+}
+
+.row .meta {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--mute);
+  font-size: 0.75rem;
+}
+
+.row .kind {
+  color: var(--accent);
+}
+
+.row .flag {
+  color: #d8a13c;
+}
+
+.row.dropped .said,
+.row.dropped .meta {
+  color: var(--mute);
+  text-decoration-color: var(--mute);
+}
+
+.row .dir {
+  color: var(--mute);
+  margin-right: 0.4rem;
+}
+
+.row.out .dir {
+  color: var(--accent);
+}
+
 @media (max-width: 800px) {
   main {
     grid-template-columns: 1fr;

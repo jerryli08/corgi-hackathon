@@ -21,8 +21,17 @@ POSES = {
     "LIFT":      [0.0, -35.0,  70.0,  55.0, 0.0, _C],
     # tucked in tight while driving, keeps the centre of gravity back
     "CARRY":     [0.0, -75.0,  95.0,  60.0, 0.0, _C],
-    # held out toward the customer
+    # held out toward the person
     "PRESENT":   [0.0, -30.0,  50.0,  20.0, 0.0, _C],
+    # folded back over the deck, jaws above the basket, still holding
+    "STOW":      [0.0, -95.0, 115.0,  70.0, 0.0, _C],
+    # same place, jaws open: the item drops the last centimetre into the basket
+    "STOW_OPEN": [0.0, -95.0, 115.0,  70.0, 0.0, _O],
+    # reaching down into the basket to take something back out
+    "UNSTOW":    [0.0, -70.0, 100.0,  85.0, 0.0, _O],
+    # up and locked: something at a known height to steady a hand against while walking.
+    # A handhold reference, NOT a support -- this base cannot take anyone's weight.
+    "HANDLE":    [0.0, -95.0,  35.0, -10.0, 0.0, _C],
 }
 
 # The single parameter that replaces IK: how far forward the arm extends.

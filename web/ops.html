@@ -27,9 +27,11 @@
           <input id="target" value="strawberries" spellcheck="false" />
           <button data-skill="fetch">fetch</button>
           <button data-skill="deliver">deliver</button>
+          <button data-skill="come">come</button>
           <button data-skill="return_item">put back</button>
           <button data-skill="scene">scene</button>
         </div>
+        <p class="stat"><span class="tab-label">basket</span> <span id="basket">—</span></p>
       </section>
 
       <section class="pane">
@@ -39,6 +41,54 @@
         </div>
         <div id="log" class="log"></div>
         <pre id="truth" class="truth"></pre>
+      </section>
+
+      <!-- Which model read the message and what it decided. That is the whole point of
+           putting a router in front of the robot, so it gets its own panel. -->
+      <section class="pane">
+        <div class="tabs">
+          <span class="tab-label">router</span>
+          <span id="router-backend" class="mute"></span>
+        </div>
+        <div class="skills">
+          <input id="preview" value="can you bring me my water bottle" spellcheck="false" />
+          <button id="preview-go">route it</button>
+        </div>
+        <p class="hint">Routes the text and reports the decision. Nothing is dispatched.</p>
+        <div id="routes" class="rows"></div>
+      </section>
+
+      <section class="pane">
+        <div class="tabs">
+          <span class="tab-label">imessage</span>
+          <span id="outbox-stats" class="mute"></span>
+        </div>
+        <div class="skills">
+          <input id="text-in" value="come here please" spellcheck="false" />
+          <button id="text-go">send as the resident</button>
+        </div>
+        <div id="messages" class="rows"></div>
+      </section>
+
+      <section class="pane">
+        <div class="tabs">
+          <span class="tab-label">walker</span>
+          <span id="walker-stats" class="mute"></span>
+        </div>
+        <div class="jog">
+          <button data-walk="start">start</button>
+          <button data-nudge="forward">fwd</button>
+          <button data-nudge="left">left</button>
+          <button data-nudge="right">right</button>
+          <button data-nudge="back">back</button>
+          <button data-walk="hold">hold</button>
+          <button data-walk="stop" class="danger">stop</button>
+        </div>
+        <p class="hint">
+          Each nudge buys one dead-man window. Stop pressing and the base stops on its own —
+          that is the safety property, so watch the countdown rather than trusting the wheels.
+        </p>
+        <pre id="walker-state" class="truth"></pre>
       </section>
     </main>
 

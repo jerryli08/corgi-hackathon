@@ -8,16 +8,17 @@ This module owns the first and subscribes to the second, so the web page can sho
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from robot.events import EventBus, phrase, progress
 
 
-class OrderStatus(str, Enum):
+class OrderStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     DONE = "done"
@@ -83,10 +84,9 @@ class OrderService:
         for task in self._tasks:
             task.cancel()
         for task in self._tasks:
-            try:
+            # CancelledError is a BaseException, so it has to be named to be swallowed.
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
         self._tasks.clear()
 
     def set_fulfill(self, fulfill: FulfillFn) -> None:
@@ -147,10 +147,8 @@ class OrderService:
             order = self._next_queued()
             if order is None:
                 self._wake.clear()
-                try:
+                with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._wake.wait(), timeout=0.5)
-                except asyncio.TimeoutError:
-                    pass
                 continue
 
             self._update(order, OrderStatus.RUNNING, "QUEUED", "robot is on it")
@@ -159,7 +157,7 @@ class OrderService:
             except asyncio.CancelledError:
                 self._update(order, OrderStatus.CANCELLED, "CANCELLED", "server shutting down")
                 raise
-            except Exception as exc:  # noqa: BLE001 -- the customer should see why
+            except Exception as exc:
                 self._update(order, OrderStatus.FAILED, "FAILED", str(exc))
                 continue
             # NEEDS_HELP survives: the order failed, but the message is an actionable

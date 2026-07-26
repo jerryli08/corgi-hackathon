@@ -33,6 +33,10 @@ class SimObject:
     x: float
     y: float
     radius_m: float = 0.035
+    # Height over width when rendered. Groceries are blobs; a standing person is not,
+    # and the aspect guard in the come skill only means something if the simulator
+    # actually draws them differently.
+    aspect: float = 1.0
     held: bool = False
 
 
@@ -42,6 +46,8 @@ class SimWorld:
     y: float = 0.0
     theta: float = 0.0
     holding: str | None = None
+    # What is aboard. Basket items travel with the robot and leave the world.
+    basket: list[str] = field(default_factory=list)
     # Set >0 to make grasps fail on purpose and exercise the ask-for-help path.
     grasp_failure_rate: float = 0.0
     objects: list[SimObject] = field(default_factory=list)
@@ -51,6 +57,7 @@ class SimWorld:
         with self._lock:
             self.x = self.y = self.theta = 0.0
             self.holding = None
+            self.basket = []
             self.objects = [
                 SimObject("strawberries", (60, 60, 220), 1.30, 0.28),
                 SimObject("banana", (60, 210, 235), 1.15, -0.22),
@@ -58,6 +65,9 @@ class SimWorld:
                 SimObject("water bottle", (200, 190, 120), 1.40, -0.45),
                 # stands in for the AprilTag on the customer's table
                 SimObject("home_tag", (200, 60, 200), -0.35, 0.0, radius_m=0.08),
+                # the person who texted. Behind and to the left, so `come` has to
+                # actually turn around and look rather than finding them straight ahead.
+                SimObject("person", (200, 120, 70), -1.60, 1.60, radius_m=0.16, aspect=2.2),
             ]
 
     # -- motion -----------------------------------------------------------
@@ -82,7 +92,7 @@ class SimWorld:
             if self.holding is not None:
                 return False
             for obj in self.objects:
-                if obj.held or obj.label == "home_tag":
+                if obj.held or obj.label in ("home_tag", "person"):
                     continue
                 dist, bearing = self.relative(obj)
                 in_zone = GRASP_MIN_M <= dist <= GRASP_MAX_M
@@ -97,13 +107,39 @@ class SimWorld:
 
     def release(self) -> None:
         with self._lock:
+            if self.holding is None:
+                return
             for obj in self.objects:
-                if obj.held:
+                # Only what is actually in the jaws. Basket items are flagged held too,
+                # and an unrelated gripper-open must not tip them onto the floor.
+                if obj.held and obj.label == self.holding:
                     obj.held = False
                     # dropped just in front of wherever the robot is now
                     obj.x = self.x + 0.22 * math.cos(self.theta)
                     obj.y = self.y + 0.22 * math.sin(self.theta)
             self.holding = None
+
+    def stow(self) -> bool:
+        """Move whatever is in the jaws into the basket, where it rides along."""
+        with self._lock:
+            if self.holding is None:
+                return False
+            self.basket.append(self.holding)
+            self.holding = None
+            return True
+
+    def unstow(self) -> bool:
+        """Take the oldest basket item back into the jaws, first in first out."""
+        with self._lock:
+            if self.holding is not None or not self.basket:
+                return False
+            label = self.basket.pop(0)
+            for obj in self.objects:
+                if obj.label == label:
+                    obj.held = True
+                    break
+            self.holding = label
+            return True
 
     # -- rendering --------------------------------------------------------
     def render(self) -> np.ndarray:
@@ -133,39 +169,55 @@ class SimWorld:
                 below_axis = math.atan2(CAM_HEIGHT_M, dist) - math.radians(CAM_PITCH_DEG)
                 py = int(horizon + math.tan(below_axis) * focal_px)
                 r = max(2, int((obj.radius_m / dist) * focal_px))
-                cv2.circle(frame, (px, py), r, obj.color, -1)
-                cv2.circle(frame, (px, py), r, (30, 30, 30), 1)
+                axes = (r, max(2, int(r * obj.aspect)))
+                cv2.ellipse(frame, (px, py), axes, 0, 0, 360, obj.color, -1)
+                cv2.ellipse(frame, (px, py), axes, 0, 0, 360, (30, 30, 30), 1)
 
+            banner = []
             if self.holding:
+                banner.append(f"holding: {self.holding}")
+            if self.basket:
+                banner.append(f"basket: {', '.join(self.basket)}")
+            if banner:
                 cv2.rectangle(frame, (0, FRAME_H - 60), (FRAME_W, FRAME_H), (40, 40, 40), -1)
-                cv2.putText(
-                    frame,
-                    f"holding: {self.holding}",
-                    (12, FRAME_H - 22),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (230, 230, 230),
-                    1,
-                    cv2.LINE_AA,
-                )
+                for i, line in enumerate(banner):
+                    cv2.putText(
+                        frame,
+                        line,
+                        (12, FRAME_H - 36 + i * 22),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55,
+                        (230, 230, 230),
+                        1,
+                        cv2.LINE_AA,
+                    )
         return frame
 
     def snapshot(self) -> dict:
         """Ground truth. When the servo loop converges somewhere wrong, this tells you
         immediately whether vision or control is the one lying to you."""
-        return {
-            "robot": {"x": round(self.x, 3), "y": round(self.y, 3), "theta": round(self.theta, 3)},
-            "holding": self.holding,
-            "objects": [
-                {
-                    "label": o.label,
-                    "distance_m": round(self.relative(o)[0], 3),
-                    "bearing_deg": round(math.degrees(self.relative(o)[1]), 1),
-                    "held": o.held,
-                }
-                for o in self.objects
-            ],
-        }
+        with self._lock:
+            objects = []
+            for o in self.objects:
+                dist, bearing = self.relative(o)
+                objects.append(
+                    {
+                        "label": o.label,
+                        "distance_m": round(dist, 3),
+                        "bearing_deg": round(math.degrees(bearing), 1),
+                        "held": o.held,
+                    }
+                )
+            return {
+                "robot": {
+                    "x": round(self.x, 3),
+                    "y": round(self.y, 3),
+                    "theta": round(self.theta, 3),
+                },
+                "holding": self.holding,
+                "basket": list(self.basket),
+                "objects": objects,
+            }
 
 
 WORLD = SimWorld()

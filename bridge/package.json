@@ -1,0 +1,17 @@
+{
+  "name": "corgi-photon-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Outbound iMessage sends for the Corgi robot, through Photon Spectrum.",
+  "main": "photon-bridge.mjs",
+  "scripts": {
+    "start": "node photon-bridge.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "spectrum-ts": "*"
+  }
+}

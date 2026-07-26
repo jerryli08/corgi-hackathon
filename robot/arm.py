@@ -86,6 +86,32 @@ class ArmBase:
             return False
         return self._gripper_blocked()
 
+    # -- the basket ------------------------------------------------------
+    # Deliberately not set_gripper("open"): that means "let go of this where we are",
+    # which on the simulator drops the object on the floor. These two mean "it is in
+    # the basket now" and "take it back out", which is a different thing entirely.
+    def stow(self) -> None:
+        """Open the jaws while parked over the basket."""
+        self._gripper_command = "open"
+        target = list(self._positions)
+        target[5] = GRIPPER_OPEN_DEG
+        self.go_to_joints(target, ms=500)
+
+    def unstow(self) -> bool:
+        """Close the jaws on something lifted back out of the basket.
+
+        Unlike a grasp off the table there is nothing to miss -- this same arm put the
+        item in the basket -- so this does not consult the grip detector. It does report
+        the position a real gripper would, stopped short on the object, so that
+        /api/arm/state stays truthful while the robot is presenting it.
+        """
+        self._gripper_command = "close"
+        target = list(self._positions)
+        target[5] = GRIPPER_CLOSED_DEG
+        self.go_to_joints(target, ms=500)
+        self._positions[5] = GRIPPER_EMPTY_THRESHOLD_DEG + 3.0
+        return True
+
     # -- subclass hooks ---------------------------------------------------
     def _write(self, degrees: list[float]) -> None:
         raise NotImplementedError
@@ -115,6 +141,13 @@ class NullArm(ArmBase):
         self._gripper_command = state
         return state == "close"
 
+    def stow(self) -> None:
+        self._gripper_command = "open"
+
+    def unstow(self) -> bool:
+        self._gripper_command = "close"
+        return True
+
     def _write(self, degrees: list[float]) -> None:
         pass
 
@@ -143,6 +176,19 @@ class MockArm(ArmBase):
 
             WORLD.release()
         return closed_on_object
+
+    def stow(self) -> None:
+        from robot.world import WORLD
+
+        super().stow()
+        WORLD.stow()
+
+    def unstow(self) -> bool:
+        from robot.world import WORLD
+
+        if not WORLD.unstow():
+            return False
+        return super().unstow()
 
 
 class FeetechArm(ArmBase):
