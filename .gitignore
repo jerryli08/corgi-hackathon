@@ -19,3 +19,10 @@ build/
 # `bun create spectrum-project@latest corgi --projectId ... --providers imessage`.
 # It is not part of this repo's history, the same way .venv/ is not.
 /corgi/
+
+# Local camera probe dumps (may contain faces / unrelated frames)
+_cam_probe/
+camera_check.jpg
+
+# Scratch recording runs — keep only the training set we intentionally commit
+datasets/walker_pill_grasp_test/

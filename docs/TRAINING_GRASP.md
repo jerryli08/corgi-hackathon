@@ -137,15 +137,36 @@ If you prefer not to use Hugging Face during recording, record to a local datase
 
 ## Part B — Train ACT (NVIDIA PC)
 
+### Dataset already in this repo
+
+After `git pull`, the grasp dataset lives at:
+
+```
+datasets/walker_pill_grasp_v2/
+```
+
+- **40 episodes**, ~10k frames, wrist C920 only  
+- Task: `grasp the pill bottle on the shelf`  
+- Recorded on the walker laptop; train on the NVIDIA PC  
+
+**Privacy:** `jerryli08/corgi-hackathon` is currently a *public* GitHub repo. Prefer flipping it to **private** (repo Settings → Change visibility) so wrist-cam demos are not world-readable.
+
 ### 1. Get the dataset onto the GPU box
-- Clone/pull from Hugging Face, **or**
-- Copy the local LeRobot dataset folder via USB
+```powershell
+git pull
+# dataset path:
+#   datasets/walker_pill_grasp_v2
+```
+
+Or, if you prefer not to use git for the big files later: copy that folder via USB / Hugging Face private dataset.
 
 ### 2. Train
 
 ```powershell
+# From the repo root on the NVIDIA PC (after git pull):
 lerobot-train `
-  --dataset.repo_id=YOUR_HF_USER/walker_pill_grasp `
+  --dataset.repo_id=local/walker_pill_grasp_v2 `
+  --dataset.root=datasets/walker_pill_grasp_v2 `
   --policy.type=act `
   --output_dir=outputs/train/walker_pill_grasp_act `
   --job_name=walker_pill_grasp_act `
