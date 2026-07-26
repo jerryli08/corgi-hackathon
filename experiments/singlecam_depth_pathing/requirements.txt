@@ -1,0 +1,9 @@
+opencv-python>=4.9.0
+torch>=2.2.0
+torchvision>=0.17.0
+transformers>=4.42.0
+accelerate>=0.30.0
+pillow>=10.0.0
+numpy>=1.26.0
+pygrabber>=0.2
+pyserial>=3.5
